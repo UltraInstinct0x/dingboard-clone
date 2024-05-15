@@ -1,6 +1,6 @@
 import { useRef,useEffect } from "react";
 import * as tf from '@tensorflow/tfjs';
-import * as ort from 'onnxruntime-web';
+import * as ort from 'onnxruntime-web/webgpu';
 
 interface ImageWithZIndex {
     image: HTMLImageElement;
@@ -22,22 +22,23 @@ export default function App() {
     const encoderSession = useRef<ort.InferenceSession>(null);
     const decoderSession = useRef<ort.InferenceSession>(null);
     
+    //culprit, i wasnt scaling the image to 1024x1024 properly, ort.Tensor was just adding border, used canvas to scale image
     async function encode(image: ImageWithZIndex) {
-        const resizedTensor = await ort.Tensor.fromImage(image.image, { resizedWidth: 1024, resizedHeight: 684 });
-        const resizeImage = resizedTensor.toImageData();
-        let imageDataTensor = await ort.Tensor.fromImage(resizeImage);
-        const imageImageData = imageDataTensor.toImageData();
-
-        let tf_tensor = tf.tensor(imageDataTensor.data, imageDataTensor.dims);
-        tf_tensor = tf_tensor.reshape([3, 684, 1024]);
-        tf_tensor = tf_tensor.transpose([1, 2, 0]).mul(255);
-
-        //console.log('tf_tensor:', tf_tensor);
-        imageDataTensor = new ort.Tensor(tf_tensor.dataSync(), tf_tensor.shape);
+        //const canvas = canvasRef.current;
+        //const ctx = canvas.getContext('2d');
+        const tempCanvas = document.createElement('canvas');
+        const tempCtx = tempCanvas.getContext('2d');
+        tempCanvas.height = 1024;
+        tempCanvas.width = 1024;
+        tempCtx.drawImage(image.image, 0, 0, 1024, 1024);
+        const imageData = tempCtx.getImageData(0, 0, 1024, 1024);
+        
+        const imageDataTensor = await ort.Tensor.fromImage(imageData);
+        //ctx.drawImage(await createImageBitmap(imageDataTensor.toImageData()), 0, 0, 1024, 1024);
 
         if (encoderSession.current == null) {
             console.log('creating encoder session');
-            encoderSession.current = await ort.InferenceSession.create('/models/mobilesam.encoder.onnx', { executionProviders: ['cpu'] });
+            encoderSession.current = await ort.InferenceSession.create('/models/mobile_sam_encoder_no_preprocess.onnx', { executionProviders: ['webgpu'] });
             console.log('success creating encoder session');
         }
         const encoder_inputs = { "input_image": imageDataTensor };
@@ -69,7 +70,8 @@ export default function App() {
         const has_mask_input_typedArray = new Float32Array(await has_mask_input.data());
         const has_mask_input_ortTensor = new ort.Tensor('float32', has_mask_input_typedArray, has_mask_input.shape);
 
-        const orig_im_size = tf.tensor([684, 1024], undefined, 'float32');
+        //this fixed the aspect ratio of output swpping the width and height
+        const orig_im_size = tf.tensor([1024, 1024], undefined, 'float32');
         const orig_im_size_typedArray = new Float32Array(await orig_im_size.data());
         const orig_im_size_ortTensor = new ort.Tensor('float32', orig_im_size_typedArray, orig_im_size.shape);
 
@@ -81,15 +83,13 @@ export default function App() {
             "has_mask_input": has_mask_input_ortTensor,
             "orig_im_size": orig_im_size_ortTensor 
         }
-        //console.log('decoder_inputs:', decoder_inputs);
 
         if (decoderSession.current == null) {
             console.log('creating decoder session');
-            decoderSession.current = await ort.InferenceSession.create('/models/mobilesam.decoder.onnx', { executionProviders: ['cpu'] });
+            decoderSession.current = await ort.InferenceSession.create('/models/mobilesam.decoder.onnx', { executionProviders: ['webgpu'] });
             console.log('success creating decoder session');
         }
         const output = await decoderSession.current.run(decoder_inputs);
-        //console.log('result:', output);
         return output;
     }
     /*
@@ -124,7 +124,7 @@ export default function App() {
                     const rect = canvas.getBoundingClientRect();
                     const x = e.clientX - rect.left + window.scrollX - img.width / 2;
                     const y = e.clientY - rect.top + window.scrollY - img.height / 2;
-                    await ctx.drawImage(img, x, y, img.width, img.height); // Draw the image with its original size
+                    await ctx.drawImage(img, x, y, img.width, img.height);
 
                     images.current.push({ image: img, zIndex: images.current.length, x, y, embed: null, points: null});
                     await encode(images.current[images.current.length - 1]);
@@ -150,7 +150,7 @@ export default function App() {
        // Check if ctrl key is pressed
         if (e.shiftKey && selectedImage.current != null) {
             const targetWidth = 1024;
-            const targetHeight = 684;
+            const targetHeight = 1024;
             const scaleX = targetWidth / selectedImage.current.image.width;
             const scaleY = targetHeight / selectedImage.current.image.height;
             const newX = relativePoints['imageX'] * scaleX;
@@ -212,37 +212,24 @@ export default function App() {
     async function handleOnKeyDown(e: KeyboardEvent<HTMLCanvasElement>) {
         if (e.key === 'c' && selectedImage.current != null) {
             const output = await decode(selectedImage.current);
-            console.log(output['masks']);
             const imageData = output['masks'].toImageData();
 
             const canvas = canvasRef.current;
             const ctx = canvas.getContext('2d');
 
-            // Create an ImageBitmap from the imageData
             const image = await createImageBitmap(imageData);
-
-            // Original dimensions (example values, replace with your actual values)
             const originalWidth = selectedImage.current.image.width;
             const originalHeight = selectedImage.current.image.height;
 
-            // Create a temporary canvas to scale the new image
             const tempCanvas = document.createElement('canvas');
             const tempCtx = tempCanvas.getContext('2d');
-
             tempCanvas.width = originalWidth;
             tempCanvas.height = originalHeight;
             tempCanvas.globalAlpha = 0.5;
 
-            // Clear the temporary canvas
-            tempCtx.clearRect(0, 0, tempCanvas.width, tempCanvas.height);
-
-            // Draw the new image scaled on the temporary canvas
-            tempCtx.drawImage(image, 0, 0, originalWidth, originalHeight);
-
-            // Draw the temporary canvas image onto the original canvas
+            tempCtx.drawImage(image, 0, 0, 1024, 1024, 0, 0, originalWidth, originalHeight);
             ctx.drawImage(tempCanvas, selectedImage.current.x, selectedImage.current.y);
 
-            // Reset the points
             selectedImage.current.points = null;
         }
     }
@@ -251,7 +238,6 @@ export default function App() {
         const canvas = canvasRef.current;
         const ctx = canvas.getContext('2d');
 
-        //clear canvas
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         for (const image of images.current) {
             if (selectedImage.current != null && selectedImage.current.image === image.image) {
