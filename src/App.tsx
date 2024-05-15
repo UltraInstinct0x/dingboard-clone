@@ -12,7 +12,6 @@ interface ImageWithZIndex {
 }
 
 ort.env.wasm.wasmPaths = '/wasm-files/'
-ort.env.wasm.numThreads = 1;
 
 export default function App() {
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -24,8 +23,6 @@ export default function App() {
     const decoderSession = useRef<ort.InferenceSession>(null);
     
     async function encode(image: ImageWithZIndex) {
-        const scaleX = 1024 / image.image.width;
-        const scaleY = 1024 / image.image.height;
         const resizedTensor = await ort.Tensor.fromImage(image.image, { resizedWidth: 1024, resizedHeight: 684 });
         const resizeImage = resizedTensor.toImageData();
         let imageDataTensor = await ort.Tensor.fromImage(resizeImage);
@@ -46,7 +43,7 @@ export default function App() {
         const encoder_inputs = { "input_image": imageDataTensor };
 
         const output = await encoderSession.current.run(encoder_inputs);
-        //console.log('image_embedding:', output);
+        console.log('image_embedding:', output);
         const image_embedding = output['image_embeddings'];
         image.embed = image_embedding;
     }
@@ -120,7 +117,6 @@ export default function App() {
         const canvas = canvasRef.current;
         const ctx = canvas.getContext('2d');
 
-        for (const file of e.dataTransfer.files) {
             const reader = new FileReader();
             reader.onload = (eventReader) => {
                 const img = new Image();
@@ -128,16 +124,15 @@ export default function App() {
                     const rect = canvas.getBoundingClientRect();
                     const x = e.clientX - rect.left + window.scrollX - img.width / 2;
                     const y = e.clientY - rect.top + window.scrollY - img.height / 2;
-                    ctx.drawImage(img, x, y, img.width, img.height); // Draw the image with its original size
+                    await ctx.drawImage(img, x, y, img.width, img.height); // Draw the image with its original size
 
                     images.current.push({ image: img, zIndex: images.current.length, x, y, embed: null, points: null});
-                    encode(images.current[images.current.length - 1]);
+                    await encode(images.current[images.current.length - 1]);
                 };
                 img.src = eventReader.target.result;
             };
 
-            reader.readAsDataURL(file);
-        }
+            reader.readAsDataURL(e.dataTransfer.files[0]);
     }
 
     function handleOnMouseDown(e: MouseEvent<HTMLCanvasElement>) {
@@ -217,6 +212,7 @@ export default function App() {
     async function handleOnKeyDown(e: KeyboardEvent<HTMLCanvasElement>) {
         if (e.key === 'c' && selectedImage.current != null) {
             const output = await decode(selectedImage.current);
+            console.log(output['masks']);
             const imageData = output['masks'].toImageData();
 
             const canvas = canvasRef.current;
@@ -235,6 +231,7 @@ export default function App() {
 
             tempCanvas.width = originalWidth;
             tempCanvas.height = originalHeight;
+            tempCanvas.globalAlpha = 0.5;
 
             // Clear the temporary canvas
             tempCtx.clearRect(0, 0, tempCanvas.width, tempCanvas.height);
