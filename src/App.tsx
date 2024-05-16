@@ -1,36 +1,60 @@
-import { useRef,useEffect } from "react";
+import { useRef, useEffect } from "react";
 import * as tf from '@tensorflow/tfjs';
 import * as ort from 'onnxruntime-web/webgpu';
+import { fabric } from 'fabric';
 
 interface ImageWithZIndex {
-    image: HTMLImageElement;
+    fabricImage: fabric.Image;
     embed: ort.Tensor | null;
-    zIndex: number;
-    x: number;
-    y: number;
     points: tf.Tensor2D | null;
 }
 
 ort.env.wasm.wasmPaths = '/wasm-files/'
-
 export default function App() {
-    const canvasRef = useRef<HTMLCanvasElement>(null);
+    const canvasRef = useRef<fabric.Canvas>(null);
     const images = useRef<ImageWithZIndex[]>([]);
     const selectedImage = useRef<ImageWithZIndex | null>(null);
-    const isDragging = useRef<boolean>(false);
-    const dragStart = useRef<{ x: number, y: number } | null>(null);
     const encoderSession = useRef<ort.InferenceSession>(null);
     const decoderSession = useRef<ort.InferenceSession>(null);
-    
-    //culprit, i wasnt scaling the image to 1024x1024 properly, ort.Tensor was just adding border, used canvas to scale image
+
+    useEffect(() => {
+        const canvas = new fabric.Canvas('canvas', {
+            backgroundColor: 'gray',
+
+        });
+        canvas.on('mouse:down', handleOnMouseDown);
+        canvas.on('dragover', handleDragOver);
+        canvas.on('drop', handleOnDrop);
+        canvas.on('selection:updated', (opt: fabric.IEvent) => {
+            selectedImage.current = images.current.find((image) => image.fabricImage === opt.selected[0]);
+        });
+        canvas.on('selection:created', (opt: fabric.IEvent) => {
+            selectedImage.current = images.current.find((image) => image.fabricImage === opt.selected[0]);
+        });
+        canvas.on('selection:cleared', () => {
+            selectedImage.current = null;
+        });
+
+        canvasRef.current = canvas;
+        return () => {
+            canvas.dispose();
+        }
+        console.log('canvas created');
+    }, []);
+    useEffect(() => {
+        window.addEventListener('keydown', handleOnKeyDown);
+        return () => {
+            window.removeEventListener('keydown', handleOnKeyDown);
+        };
+    }, []);
+
+    //culprit, i wasnt scaling the image to 1024x1024 properly, ort.Tensor resize was just adding border, used canvas to scale image
     async function encode(image: ImageWithZIndex) {
-        //const canvas = canvasRef.current;
-        //const ctx = canvas.getContext('2d');
         const tempCanvas = document.createElement('canvas');
         const tempCtx = tempCanvas.getContext('2d');
         tempCanvas.height = 1024;
         tempCanvas.width = 1024;
-        tempCtx.drawImage(image.image, 0, 0, 1024, 1024);
+        tempCtx.drawImage(image.fabricImage.getElement(), 0, 0, 1024, 1024);
         const imageData = tempCtx.getImageData(0, 0, 1024, 1024);
         
         const imageDataTensor = await ort.Tensor.fromImage(imageData);
@@ -44,7 +68,6 @@ export default function App() {
         const encoder_inputs = { "input_image": imageDataTensor };
 
         const output = await encoderSession.current.run(encoder_inputs);
-        console.log('image_embedding:', output);
         const image_embedding = output['image_embeddings'];
         image.embed = image_embedding;
     }
@@ -70,7 +93,6 @@ export default function App() {
         const has_mask_input_typedArray = new Float32Array(await has_mask_input.data());
         const has_mask_input_ortTensor = new ort.Tensor('float32', has_mask_input_typedArray, has_mask_input.shape);
 
-        //this fixed the aspect ratio of output swpping the width and height
         const orig_im_size = tf.tensor([1024, 1024], undefined, 'float32');
         const orig_im_size_typedArray = new Float32Array(await orig_im_size.data());
         const orig_im_size_ortTensor = new ort.Tensor('float32', orig_im_size_typedArray, orig_im_size.shape);
@@ -91,70 +113,25 @@ export default function App() {
         }
         const output = await decoderSession.current.run(decoder_inputs);
         return output;
-    }
-    /*
-    //async function sendDataToBackend(data: tf.Tensor3D, embed: ort.Tensor): tf.Tensor3D {
-        // Assuming you have an API endpoint to send the data
-        // no cors
-        const apiUrl = 'http://127.0.0.1:5000/image';
-        try {
-            const response = await fetch(apiUrl, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ data: data.arraySync(), embed: embed}),
-            });
-            return await response.blob();
-        } catch (error) {
-            console.error('Error sending data to backend:', error);
-        }
-    }
-    */
-    async function handleOnDrop(e: DragEvent<HTMLCanvasElement>) {
-        e.preventDefault();
+    }   
+    function handleOnMouseDown(opt: fabric.IEvent) {
+        if (opt.e.shiftKey && selectedImage.current != null) {
+            //scale the point to the image's local coords then to 1024x1024
+            const canvas = canvasRef.current;
+            const mCanvas = canvas.viewportTransform;
+            const mImage = selectedImage.current.fabricImage.calcTransformMatrix();
+            const mTotal = fabric.util.multiplyTransformMatrices(mCanvas, mImage);
+            const point = new fabric.Point(opt.pointer.x, opt.pointer.y);
+            const mPoint = fabric.util.transformPoint(point, fabric.util.invertTransform(mTotal));
+            const x = mPoint.x + selectedImage.current.fabricImage.width / 2;
+            const y = mPoint.y + selectedImage.current.fabricImage.height / 2;
 
-        const canvas = canvasRef.current;
-        const ctx = canvas.getContext('2d');
-
-            const reader = new FileReader();
-            reader.onload = (eventReader) => {
-                const img = new Image();
-                img.onload = async () => {
-                    const rect = canvas.getBoundingClientRect();
-                    const x = e.clientX - rect.left + window.scrollX - img.width / 2;
-                    const y = e.clientY - rect.top + window.scrollY - img.height / 2;
-                    await ctx.drawImage(img, x, y, img.width, img.height);
-
-                    images.current.push({ image: img, zIndex: images.current.length, x, y, embed: null, points: null});
-                    await encode(images.current[images.current.length - 1]);
-                };
-                img.src = eventReader.target.result;
-            };
-
-            reader.readAsDataURL(e.dataTransfer.files[0]);
-    }
-
-    function handleOnMouseDown(e: MouseEvent<HTMLCanvasElement>) {
-        const canvas = canvasRef.current;
-        const ctx = canvas.getContext('2d');
-
-        //find the image that was clicked on
-        const rect = canvas.getBoundingClientRect();
-        const x = e.clientX - rect.left + window.scrollX;
-        const y = e.clientY - rect.top + window.scrollY;
-        dragStart.current = { x, y };
-        const relativePoints = selectImage(images.current, x, y);
-        drawImages();
-        isDragging.current = selectedImage.current != null;
-       // Check if ctrl key is pressed
-        if (e.shiftKey && selectedImage.current != null) {
             const targetWidth = 1024;
             const targetHeight = 1024;
-            const scaleX = targetWidth / selectedImage.current.image.width;
-            const scaleY = targetHeight / selectedImage.current.image.height;
-            const newX = relativePoints['imageX'] * scaleX;
-            const newY = relativePoints['imageY'] * scaleY;
+            const scaleX = targetWidth / opt.target.width;
+            const scaleY = targetHeight / opt.target.height;
+            const newX = x * scaleX;
+            const newY = y * scaleY;
             if (selectedImage.current.points == null) {
                 selectedImage.current.points = tf.tensor([[newX, newY]], [1, 2], 'float32');
             } else {
@@ -163,110 +140,64 @@ export default function App() {
         }
     }
 
-    function selectImage(images: ImageWithZIndex[], x: number, y: number): { imageX: number, imageY: number } | null{
-        let selected = false;
-        let temp = null;
-        for (let i = images.length - 1; i >= 0; i--) {
-            const image = images[i];
-            if (x >= image.x && x <= image.x + image.image.width && y >= image.y && y <= image.y + image.image.height) {
-                if (temp != null && temp.zIndex > image.zIndex) {
-                    continue;
-                }
-                temp = image;
-                selected = true;
+    async function handleOnDrop(opt: fabric.IEvent) {
+        const e = opt.e;
+        e.preventDefault();
+
+        const canvas = canvasRef.current;
+        const reader = new FileReader();
+        reader.onload = async (eventReader) => {
+            const image = new Image();
+            image.onload = async () => {
+                const imgInstance = new fabric.Image(image, {
+                    left: e.x,
+                    top: e.y,
+                });
+                canvas.add(imgInstance);
+                images.current.push({ fabricImage: imgInstance, embed: null, points: null });
+                await encode(images.current[images.current.length - 1]);
             }
-        }
-        if (!selected) {
-            selectedImage.current = null;
-        } else {
-            selectedImage.current = temp;
-            return { imageX: x - temp.x, imageY: y - temp.y };
-        }
+            image.src = eventReader.target.result;
+        };
+        reader.readAsDataURL(e.dataTransfer.files[0]);
     }
 
-    function handleOnMouseUp(e: MouseEvent<HTMLCanvasElement>) {
-        isDragging.current = false;
-        dragStart.current = null;
-    }
+    function handleDragOver(opt) {
+         opt.e.preventDefault();
+     };
 
-    function handleonMouseMove(e: MouseEvent<HTMLCanvasElement>) {
-        if (isDragging.current && selectedImage.current != null) {
-            const canvas = canvasRef.current;
-            const ctx = canvas.getContext('2d');
-
-            const rect = canvas.getBoundingClientRect();
-            const x = e.clientX - rect.left + window.scrollX;
-            const y = e.clientY - rect.top + window.scrollY;
-
-            const deltaX = x - dragStart.current.x;
-            const deltaY = y - dragStart.current.y;
-            dragStart.current = { x, y };
-
-            selectedImage.current.x += deltaX;
-            selectedImage.current.y += deltaY;
-
-            drawImages();
-        }
-    }
-
-    async function handleOnKeyDown(e: KeyboardEvent<HTMLCanvasElement>) {
+    async function handleOnKeyDown(e: KeyboardEvent) {
         if (e.key === 'c' && selectedImage.current != null) {
+            //decode and resize to original image size
             const output = await decode(selectedImage.current);
             const imageData = output['masks'].toImageData();
-
-            const canvas = canvasRef.current;
-            const ctx = canvas.getContext('2d');
-
-            const image = await createImageBitmap(imageData);
-            const originalWidth = selectedImage.current.image.width;
-            const originalHeight = selectedImage.current.image.height;
-
+            const tempImage = await createImageBitmap(imageData);
             const tempCanvas = document.createElement('canvas');
             const tempCtx = tempCanvas.getContext('2d');
-            tempCanvas.width = originalWidth;
-            tempCanvas.height = originalHeight;
-            tempCanvas.globalAlpha = 0.5;
+            tempCanvas.height = selectedImage.current.fabricImage.height;
+            tempCanvas.width = selectedImage.current.fabricImage.width;
+            tempCtx.drawImage(tempImage, 0, 0, 1024, 1024, 0, 0, selectedImage.current.fabricImage.width, selectedImage.current.fabricImage.height);
 
-            tempCtx.drawImage(image, 0, 0, 1024, 1024, 0, 0, originalWidth, originalHeight);
-            ctx.drawImage(tempCanvas, selectedImage.current.x, selectedImage.current.y);
+            //transformations to match the image on the canvas 
+            const image = new fabric.Image(tempCanvas, {
+                left: selectedImage.current.fabricImage.left,
+                top: selectedImage.current.fabricImage.top,
+            });
+            const canvas = canvasRef.current;
+            const mCanvas = canvas.viewportTransform;
+            const mImage = selectedImage.current.fabricImage.calcTransformMatrix();
+            const mTotal = fabric.util.multiplyTransformMatrices(mCanvas, mImage);
+            const opt = fabric.util.qrDecompose(mTotal);
+            image.set(opt);
+            canvas.add(image);
 
             selectedImage.current.points = null;
         }
     }
 
-    function drawImages() {
-        const canvas = canvasRef.current;
-        const ctx = canvas.getContext('2d');
-
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        for (const image of images.current) {
-            if (selectedImage.current != null && selectedImage.current.image === image.image) {
-                ctx.strokeStyle = 'black';
-                ctx.lineWidth = 1;
-                ctx.strokeRect(image.x, image.y, image.image.width, image.image.height);
-                ctx.drawImage(selectedImage.current.image, selectedImage.current.x, selectedImage.current.y);
-                continue;
-            }
-            ctx.drawImage(image.image, image.x, image.y);
-        }
-    }
-
     return (
         <main>
-            <canvas
-                id="canvas"
-                ref={canvasRef}
-                width={window.innerWidth}
-                height={window.innerHeight}
-                tabIndex="0"
-                className="bg-gray-700 outline-none"
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={handleOnDrop}
-                onMouseDown={handleOnMouseDown}
-                onMouseUp={handleOnMouseUp}
-                onMouseMove={handleonMouseMove}
-                onKeyDown={handleOnKeyDown}
-            ></canvas>
+            <canvas id="canvas" width={window.innerWidth} height={window.innerHeight} tabIndex={0} /> 
         </main>
     );
 }
