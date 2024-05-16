@@ -205,30 +205,65 @@ export default function App() {
 
     async function handleOnKeyDown(e: KeyboardEvent) {
         if (e.key === 'c' && selectedImage.current != null) {
-            //decode and resize to original image size
+            if (selectedImage.current.embed == null) {
+                await encode(selectedImage.current);
+            }
+            //get mask
             const output = await decode(selectedImage.current);
-            const imageData = output['masks'].toImageData();
-            const tempImage = await createImageBitmap(imageData);
+
+            //apply mask to image 
+            const originalImageCanvas = selectedImage.current.fabricImage.toCanvasElement({withoutTransform: true});
+            const tempCanvas1 = document.createElement('canvas');
+            const tempCtx1 = tempCanvas1.getContext('2d');
+            tempCanvas1.height = 1024;
+            tempCanvas1.width = 1024;
+            tempCtx1.drawImage(originalImageCanvas, 0, 0, 1024, 1024);
+
+            const originalImageData = tempCtx1.getImageData(0, 0, 1024, 1024);
+            const maskImageData = output['masks'].toImageData();
+
+            let maskTensor = tf.tensor(maskImageData.data, [maskImageData.data.length/4, 4], 'float32');
+            maskTensor = maskTensor.slice([0,0], [-1, 3]);
+            maskTensor = maskTensor.notEqual(0).any(1).cast('int32').reshape([maskImageData.data.length/4, 1]).tile([1,4]);
+            const originalImageTensor = tf.tensor(originalImageData.data, [originalImageData.data.length/4, 4], 'float32');
+            const resultTensor =  maskTensor.mul(originalImageTensor);
+            const resultImageData = new ImageData(new Uint8ClampedArray(await resultTensor.data()), 1024, 1024);
+
+            /*
+            for (let i = 0; i <maskImageData.data.length; i+=4) {
+                if (maskImageData.data[i] == 0 && maskImageData.data[i+1] == 0 && maskImageData.data[i+2] == 0) {
+                    maskImageData.data[i+3] = 0;
+                } else {
+                    maskImageData.data[i] = originalImageData.data[i];
+                    maskImageData.data[i+1] = originalImageData.data[i+1];
+                    maskImageData.data[i+2] = originalImageData.data[i+2];
+                    maskImageData.data[i+3] = originalImageData.data[i+3];
+                }
+            }
+            */
+
+            //scale back up to original image size
+            const tempImage = await createImageBitmap(resultImageData);
             const tempCanvas = document.createElement('canvas');
             const tempCtx = tempCanvas.getContext('2d');
             tempCanvas.height = selectedImage.current.fabricImage.height;
             tempCanvas.width = selectedImage.current.fabricImage.width;
             tempCtx.drawImage(tempImage, 0, 0, 1024, 1024, 0, 0, selectedImage.current.fabricImage.width, selectedImage.current.fabricImage.height);
 
-            //transformations to match the image on the canvas 
+            //transformations to match the mask on the image on the canvas 
             const image = new fabric.Image(tempCanvas, {
                 left: selectedImage.current.fabricImage.left,
                 top: selectedImage.current.fabricImage.top,
             });
             const canvas = canvasRef.current;
-            const mCanvas = canvas.viewportTransform;
             const mImage = selectedImage.current.fabricImage.calcTransformMatrix();
-            const mTotal = fabric.util.multiplyTransformMatrices(mCanvas, mImage);
-            const opt = fabric.util.qrDecompose(mTotal);
+            const opt = fabric.util.qrDecompose(mImage);
             image.set(opt);
-            canvas.add(image);
 
             selectedImage.current.points = null;
+            images.current.push({ fabricImage: image, embed: null, points: null });
+            canvas.add(image);
+            canvas.setActiveObject(image);
         }
     }
 
