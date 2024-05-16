@@ -87,15 +87,9 @@ export default function App() {
 
     //culprit, i wasnt scaling the image to 1024x1024 properly, ort.Tensor resize was just adding border, used canvas to scale image
     async function encode(image: ImageWithZIndex) {
-        const tempCanvas = document.createElement('canvas');
-        const tempCtx = tempCanvas.getContext('2d');
-        tempCanvas.height = 1024;
-        tempCanvas.width = 1024;
-        tempCtx.drawImage(image.fabricImage.getElement(), 0, 0, 1024, 1024);
-        const imageData = tempCtx.getImageData(0, 0, 1024, 1024);
-        
+        const imageTensor = tf.image.resizeBilinear(tf.browser.fromPixels(image.fabricImage.getElement()), [1024, 1024]).concat(tf.ones([1024, 1024, 1], 'float32').mul(255), 2);
+        const imageData = new ImageData(new Uint8ClampedArray(await imageTensor.data()), 1024, 1024);
         const imageDataTensor = await ort.Tensor.fromImage(imageData);
-        //ctx.drawImage(await createImageBitmap(imageDataTensor.toImageData()), 0, 0, 1024, 1024);
 
         if (encoderSession.current == null) {
             console.log('creating encoder session');
