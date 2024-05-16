@@ -205,6 +205,9 @@ export default function App() {
 
     async function handleOnKeyDown(e: KeyboardEvent) {
         if (e.key === 'c' && selectedImage.current != null) {
+            const originalWidth = selectedImage.current.fabricImage.width;
+            const originalHeight = selectedImage.current.fabricImage.height;
+
             if (selectedImage.current.embed == null) {
                 await encode(selectedImage.current);
             }
@@ -226,8 +229,9 @@ export default function App() {
             maskTensor = maskTensor.slice([0,0], [-1, 3]);
             maskTensor = maskTensor.notEqual(0).any(1).cast('int32').reshape([maskImageData.data.length/4, 1]).tile([1,4]);
             const originalImageTensor = tf.tensor(originalImageData.data, [originalImageData.data.length/4, 4], 'float32');
-            const resultTensor =  maskTensor.mul(originalImageTensor);
-            const resultImageData = new ImageData(new Uint8ClampedArray(await resultTensor.data()), 1024, 1024);
+            let resultTensor =  maskTensor.mul(originalImageTensor);
+            resultTensor = tf.image.resizeBilinear(resultTensor.reshape([1, 1024, 1024, 4]), [originalHeight, originalWidth]);
+            const resultImageData = new ImageData(new Uint8ClampedArray(await resultTensor.data()), originalWidth, originalHeight);
 
             /*
             for (let i = 0; i <maskImageData.data.length; i+=4) {
@@ -240,7 +244,6 @@ export default function App() {
                     maskImageData.data[i+3] = originalImageData.data[i+3];
                 }
             }
-            */
 
             //scale back up to original image size
             const tempImage = await createImageBitmap(resultImageData);
@@ -249,9 +252,10 @@ export default function App() {
             tempCanvas.height = selectedImage.current.fabricImage.height;
             tempCanvas.width = selectedImage.current.fabricImage.width;
             tempCtx.drawImage(tempImage, 0, 0, 1024, 1024, 0, 0, selectedImage.current.fabricImage.width, selectedImage.current.fabricImage.height);
+            */
 
             //transformations to match the mask on the image on the canvas 
-            const image = new fabric.Image(tempCanvas, {
+            const image = new fabric.Image(await createImageBitmap(resultImageData), {
                 left: selectedImage.current.fabricImage.left,
                 top: selectedImage.current.fabricImage.top,
             });
