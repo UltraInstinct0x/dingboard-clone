@@ -84,23 +84,40 @@ export default function App() {
             window.removeEventListener('keydown', handleOnKeyDown);
         };
     }, []);
+    useEffect(() => {
+        async function loadModels() {
+            try {
+                encoderSession.current = await ort.InferenceSession.create('/models/mobile_sam_encoder_no_preprocess.onnx', { executionProviders: ['webgpu'] });
+                decoderSession.current = await ort.InferenceSession.create('/models/mobilesam.decoder.onnx', { executionProviders: ['webgpu'] });
+            } catch (error) {
+                console.error('Failed to load models:', error);
+            }
+        }
+        loadModels();
+        return () => {
+            if (encoderSession.current) {
+                encoderSession.current.release();
+            }
+            if (decoderSession.current) {
+                decoderSession.current.release();
+            }
+        };
+    }, []);
 
     //culprit, i wasnt scaling the image to 1024x1024 properly, ort.Tensor resize was just adding border, used canvas to scale image
     async function encode(image: ImageWithZIndex) {
         const imageTensor = tf.image.resizeBilinear(tf.browser.fromPixels(image.fabricImage.getElement()), [1024, 1024]).concat(tf.ones([1024, 1024, 1], 'float32').mul(255), 2);
         const imageData = new ImageData(new Uint8ClampedArray(await imageTensor.data()), 1024, 1024);
+        imageTensor.dispose();
         const imageDataTensor = await ort.Tensor.fromImage(imageData);
 
-        if (encoderSession.current == null) {
-            console.log('creating encoder session');
-            encoderSession.current = await ort.InferenceSession.create('/models/mobile_sam_encoder_no_preprocess.onnx', { executionProviders: ['webgpu'] });
-            console.log('success creating encoder session');
-        }
         const encoder_inputs = { "input_image": imageDataTensor };
 
         const output = await encoderSession.current.run(encoder_inputs);
         const image_embedding = output['image_embeddings'];
         image.embed = image_embedding;
+
+        imageDataTensor.dispose();
     }
 
     async function decode(image: ImageWithZIndex) {
@@ -137,12 +154,23 @@ export default function App() {
             "orig_im_size": orig_im_size_ortTensor 
         }
 
-        if (decoderSession.current == null) {
-            console.log('creating decoder session');
-            decoderSession.current = await ort.InferenceSession.create('/models/mobilesam.decoder.onnx', { executionProviders: ['webgpu'] });
-            console.log('success creating decoder session');
-        }
         const output = await decoderSession.current.run(decoder_inputs);
+
+        additional_point.dispose();
+        input_points_minus1D.dispose();
+        point_labels_points.dispose();
+        point_labels_minus1D.dispose();
+        point_labels.dispose();
+        mask_input.dispose();
+        has_mask_input.dispose();
+        orig_im_size.dispose();
+
+        point_coords_ortTensor.dispose();
+        point_labels_ortTensor.dispose();
+        mask_input_ortTensor.dispose();
+        has_mask_input_ortTensor.dispose();
+        orig_im_size_ortTensor.dispose();
+
         return output;
     }   
     function handleOnMouseDown(opt: fabric.IEvent) {
@@ -242,21 +270,24 @@ export default function App() {
             const mImage = selectedImage.current.fabricImage.calcTransformMatrix();
             const opt = fabric.util.qrDecompose(mImage);
             image.set(opt);
-
+            
+            selectedImage.current.points.dispose();
             selectedImage.current.points = null;
             images.current.push({ fabricImage: image, embed: null, points: null });
             canvas.add(image);
 
-
-
             canvas.setActiveObject(image);
+
+            originalImageTensor.dispose();
+            maskTensor.dispose();
+            resultTensor.dispose();
         }
     }
 
     function findBoundingBox(tensor: tf.tensor3D) {
         const [height, width, channels] = tensor.shape;
-        const mask = tensor.slice([0,0,3]);
         return tf.tidy(() => {  
+            const mask = tensor.slice([0,0,3]);
             const opaqueMask = mask.greater(tf.scalar(0));
             const rowMaskArray = opaqueMask.any(1).arraySync();
             const colMaskArray = opaqueMask.any(0).arraySync();
