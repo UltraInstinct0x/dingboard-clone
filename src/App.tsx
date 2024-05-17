@@ -20,7 +20,7 @@ export default function App() {
     useEffect(() => {
         const canvas = new fabric.Canvas('canvas', {
             backgroundColor: 'gray',
-
+            preserveObjectStacking: true,
         });
         canvas.on('mouse:down', handleOnMouseDown);
         canvas.on('dragover', handleDragOver);
@@ -183,6 +183,10 @@ export default function App() {
                 const imgInstance = new fabric.Image(image, {
                     left: e.x,
                     top: e.y,
+                    borderColor: 'black',
+                    cornerColor: 'white',
+                    cornerStrokeColor: 'black',
+                    transparentCorners: false
                 });
                 canvas.add(imgInstance);
                 images.current.push({ fabricImage: imgInstance, embed: null, points: null });
@@ -221,9 +225,18 @@ export default function App() {
             const resultImageData = new ImageData(new Uint8ClampedArray(await resultTensor.data()), originalWidth, originalHeight);
 
             //transformations to match the mask on the image on the canvas 
+            const boundingBox = findBoundingBox(resultTensor);
             const image = new fabric.Image(await createImageBitmap(resultImageData), {
-                left: selectedImage.current.fabricImage.left,
-                top: selectedImage.current.fabricImage.top,
+                left: selectedImage.current.fabricImage.left + boundingBox.minX,
+                top: selectedImage.current.fabricImage.top + boundingBox.minY,
+                cropX: boundingBox.minX,
+                cropY: boundingBox.minY,
+                width: boundingBox.maxX - boundingBox.minX,
+                height: boundingBox.maxY - boundingBox.minY,
+                borderColor: 'black',
+                cornerColor: 'white',
+                cornerStrokeColor: 'black',
+                transparentCorners: false
             });
             const canvas = canvasRef.current;
             const mImage = selectedImage.current.fabricImage.calcTransformMatrix();
@@ -233,9 +246,51 @@ export default function App() {
             selectedImage.current.points = null;
             images.current.push({ fabricImage: image, embed: null, points: null });
             canvas.add(image);
+
+
+
             canvas.setActiveObject(image);
         }
     }
+
+    function findBoundingBox(tensor: tf.tensor3D) {
+        const [height, width, channels] = tensor.shape;
+        const mask = tensor.slice([0,0,3]);
+        return tf.tidy(() => {  
+            const opaqueMask = mask.greater(tf.scalar(0));
+            const rowMaskArray = opaqueMask.any(1).arraySync();
+            const colMaskArray = opaqueMask.any(0).arraySync();
+
+            const boundingBox = {minX: 0, minY: 0, maxX: 0, maxY: 0};
+            for (let i=0;i<height;i++) {
+                if (rowMaskArray[i][0]) {
+                    boundingBox.minY = i;
+                    break;
+                }
+            }
+            for (let i=height-1;i>=0;i--) {
+                if (rowMaskArray[i][0]) {
+                    boundingBox.maxY = i;
+                    break;
+                }
+            }
+            for (let i=0;i<width;i++) {
+                if (colMaskArray[i][0]) {
+                    boundingBox.minX = i;
+                    break;
+                }
+            }
+            for (let i=width-1;i>=0;i--) {
+                if (colMaskArray[i][0]) {
+                    boundingBox.maxX = i;
+                    break;
+                }
+            }
+            return boundingBox;
+        });
+
+    }
+
 
     return (
         <main>
