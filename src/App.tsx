@@ -2,6 +2,7 @@ import { useRef, useEffect } from "react";
 import * as tf from '@tensorflow/tfjs';
 import * as ort from 'onnxruntime-web/webgpu';
 import { fabric } from 'fabric';
+import Menu from './Menu';
 
 interface ImageWithZIndex {
     fabricImage: fabric.Image;
@@ -19,7 +20,7 @@ export default function App() {
 
     useEffect(() => {
         const canvas = new fabric.Canvas('canvas', {
-            backgroundColor: 'gray',
+            backgroundColor: 'Gainsboro',
             preserveObjectStacking: true,
         });
         canvas.on('mouse:down', handleOnMouseDown);
@@ -27,9 +28,27 @@ export default function App() {
         canvas.on('drop', handleOnDrop);
         canvas.on('selection:updated', (opt: fabric.IEvent) => {
             selectedImage.current = images.current.find((image) => image.fabricImage === opt.selected[0]);
+            const group = opt.selected[0].group;
+            if (group) {
+                group.set({
+                    borderColor: 'black',
+                    cornerColor: 'white',
+                    cornerStrokeColor: 'black',
+                    transparentCorners: false
+                });
+            }
         });
         canvas.on('selection:created', (opt: fabric.IEvent) => {
             selectedImage.current = images.current.find((image) => image.fabricImage === opt.selected[0]);
+            const group = opt.selected[0].group;
+            if (group) {
+                group.set({
+                    borderColor: 'black',
+                    cornerColor: 'white',
+                    cornerStrokeColor: 'black',
+                    transparentCorners: false
+                });
+            }
         });
         canvas.on('selection:cleared', () => {
             selectedImage.current = null;
@@ -73,10 +92,10 @@ export default function App() {
         });
         
         canvasRef.current = canvas;
+        console.log('canvas created');
         return () => {
             canvas.dispose();
         }
-        console.log('canvas created');
     }, []);
     useEffect(() => {
         window.addEventListener('keydown', handleOnKeyDown);
@@ -103,7 +122,17 @@ export default function App() {
             }
         };
     }, []);
-
+    useEffect(() => {
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'visible' && canvasRef.current) {
+                canvasRef.current.requestRenderAll();
+            }
+        };
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        return () => {
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+        };
+    }, []);
     //culprit, i wasnt scaling the image to 1024x1024 properly, ort.Tensor resize was just adding border, used canvas to scale image
     async function encode(image: ImageWithZIndex) {
         const imageTensor = tf.image.resizeBilinear(tf.browser.fromPixels(image.fabricImage.getElement()), [1024, 1024]).concat(tf.ones([1024, 1024, 1], 'float32').mul(255), 2);
@@ -324,8 +353,8 @@ export default function App() {
 
 
     return (
-        <main>
-            <canvas id="canvas" width={window.innerWidth} height={window.innerHeight} tabIndex={0} /> 
+        <main >
+            <canvas id="canvas" width={window.innerWidth} height={window.innerHeight} tabIndex={0}/> 
         </main>
     );
 }
