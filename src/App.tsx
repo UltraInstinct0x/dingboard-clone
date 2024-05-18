@@ -4,7 +4,7 @@ import * as ort from 'onnxruntime-web/webgpu';
 import { fabric } from 'fabric';
 import Menu from './Menu';
 
-interface ImageWithZIndex {
+interface ImageObject {
     fabricImage: fabric.Image;
     embed: ort.Tensor | null;
     points: tf.Tensor2D | null;
@@ -13,8 +13,8 @@ interface ImageWithZIndex {
 ort.env.wasm.wasmPaths = '/wasm-files/'
 export default function App() {
     const canvasRef = useRef<fabric.Canvas>(null);
-    const images = useRef<ImageWithZIndex[]>([]);
-    const selectedImage = useRef<ImageWithZIndex | null>(null);
+    const images = useRef<ImageObject[]>([]);
+    const selectedImage = useRef<ImageObject | null>(null);
     const encoderSession = useRef<ort.InferenceSession>(null);
     const decoderSession = useRef<ort.InferenceSession>(null);
 
@@ -26,30 +26,8 @@ export default function App() {
         canvas.on('mouse:down', handleOnMouseDown);
         canvas.on('dragover', handleDragOver);
         canvas.on('drop', handleOnDrop);
-        canvas.on('selection:updated', (opt: fabric.IEvent) => {
-            selectedImage.current = images.current.find((image) => image.fabricImage === opt.selected[0]);
-            const group = opt.selected[0].group;
-            if (group) {
-                group.set({
-                    borderColor: 'black',
-                    cornerColor: 'white',
-                    cornerStrokeColor: 'black',
-                    transparentCorners: false
-                });
-            }
-        });
-        canvas.on('selection:created', (opt: fabric.IEvent) => {
-            selectedImage.current = images.current.find((image) => image.fabricImage === opt.selected[0]);
-            const group = opt.selected[0].group;
-            if (group) {
-                group.set({
-                    borderColor: 'black',
-                    cornerColor: 'white',
-                    cornerStrokeColor: 'black',
-                    transparentCorners: false
-                });
-            }
-        });
+        canvas.on('selection:updated', handleSelecttion);
+        canvas.on('selection:created', handleSelecttion);            
         canvas.on('selection:cleared', () => {
             selectedImage.current = null;
         });
@@ -97,12 +75,14 @@ export default function App() {
             canvas.dispose();
         }
     }, []);
+
     useEffect(() => {
         window.addEventListener('keydown', handleOnKeyDown);
         return () => {
             window.removeEventListener('keydown', handleOnKeyDown);
         };
     }, []);
+    
     useEffect(() => {
         async function loadModels() {
             try {
@@ -122,6 +102,7 @@ export default function App() {
             }
         };
     }, []);
+
     useEffect(() => {
         const handleVisibilityChange = () => {
             if (document.visibilityState === 'visible' && canvasRef.current) {
@@ -133,8 +114,22 @@ export default function App() {
             document.removeEventListener('visibilitychange', handleVisibilityChange);
         };
     }, []);
-    //culprit, i wasnt scaling the image to 1024x1024 properly, ort.Tensor resize was just adding border, used canvas to scale image
-    async function encode(image: ImageWithZIndex) {
+
+    async function handleSelecttion(opt: Fabric.IEvent) {
+        selectedImage.current = images.current.find((image) => image.fabricImage === opt.selected[0]);
+        const group = opt.selected[0].group;
+        if (group) {
+            group.set({
+                borderColor: 'black',
+                cornerColor: 'white',
+                cornerStrokeColor: 'black',
+                transparentCorners: false
+            });
+        }
+    }
+
+    //culprit, i wasnt scaling the image to 1024x1024 properly, ort.Tensor resize was just adding border 
+    async function encode(image: ImageObject) {
         const imageTensor = tf.image.resizeBilinear(tf.browser.fromPixels(image.fabricImage.getElement()), [1024, 1024]).concat(tf.ones([1024, 1024, 1], 'float32').mul(255), 2);
         const imageData = new ImageData(new Uint8ClampedArray(await imageTensor.data()), 1024, 1024);
         imageTensor.dispose();
@@ -149,26 +144,20 @@ export default function App() {
         imageDataTensor.dispose();
     }
 
-    async function decode(image: ImageWithZIndex) {
+    async function decode(image: ImageObject) {
         const input_points = image.points;
         const additional_point = tf.tensor([[0.0, 0.0]], [1,2], 'float32')
-        const input_points_minus1D = tf.concat([input_points, additional_point]);
-        const point_coords = input_points_minus1D.expandDims(0);
-        const point_coords_typedArray = new Float32Array(await point_coords.data());
-        const point_coords_ortTensor = new ort.Tensor('float32', point_coords_typedArray, point_coords.shape);
+        const point_coords = tf.concat([input_points, additional_point]).expandDims(0);
+        const point_coords_ortTensor = new ort.Tensor('float32', new Float32Array(await point_coords.data()), point_coords.shape);
 
         const point_labels_points = tf.ones([input_points.shape[0]], 'float32');
-        const point_labels_minus1D = tf.concat([point_labels_points, tf.tensor([0], undefined, 'float32')]); 
-        const point_labels = point_labels_minus1D.expandDims(0);
-        const point_labels_typedArray = new Float32Array(await point_labels_minus1D.data());
-        const point_labels_ortTensor = new ort.Tensor('float32', point_labels_typedArray, point_labels.shape);
+        const point_labels = tf.concat([point_labels_points, tf.tensor([0], undefined, 'float32')]).expandDims(0);
+        const point_labels_ortTensor = new ort.Tensor('float32', new Float32Array(await point_labels.data()), point_labels.shape);
 
         const mask_input = tf.zeros([1,1,256,256], 'float32');
-        const mask_input_typedArray = new Float32Array(await mask_input.data());
-        const mask_input_ortTensor = new ort.Tensor('float32', mask_input_typedArray, mask_input.shape);
+        const mask_input_ortTensor = new ort.Tensor('float32', new Float32Array(await mask_input.data()), mask_input.shape);
         const has_mask_input = tf.zeros([1], 'float32');
-        const has_mask_input_typedArray = new Float32Array(await has_mask_input.data());
-        const has_mask_input_ortTensor = new ort.Tensor('float32', has_mask_input_typedArray, has_mask_input.shape);
+        const has_mask_input_ortTensor = new ort.Tensor('float32', new Float32Array(await has_mask_input.data()), has_mask_input.shape);
 
         const orig_im_size = tf.tensor([1024, 1024], undefined, 'float32');
         const orig_im_size_typedArray = new Float32Array(await orig_im_size.data());
@@ -186,9 +175,7 @@ export default function App() {
         const output = await decoderSession.current.run(decoder_inputs);
 
         additional_point.dispose();
-        input_points_minus1D.dispose();
         point_labels_points.dispose();
-        point_labels_minus1D.dispose();
         point_labels.dispose();
         mask_input.dispose();
         has_mask_input.dispose();
@@ -202,6 +189,7 @@ export default function App() {
 
         return output;
     }   
+
     function handleOnMouseDown(opt: fabric.IEvent) {
         if (opt.e.shiftKey && selectedImage.current != null) {
             //scale the point to the image's local coords then to 1024x1024
@@ -220,6 +208,7 @@ export default function App() {
             const scaleY = targetHeight / opt.target.height;
             const newX = x * scaleX;
             const newY = y * scaleY;
+
             if (selectedImage.current.points == null) {
                 selectedImage.current.points = tf.tensor([[newX, newY]], [1, 2], 'float32');
             } else {
@@ -269,7 +258,7 @@ export default function App() {
             //get mask
             const output = await decode(selectedImage.current);
 
-            //apply mask to image 
+            //apply mask to image, TODO: toCanvasElement returns 0,0,0,255 when transparent, turning it black
             const originalImageCanvas = selectedImage.current.fabricImage.toCanvasElement({withoutTransform: true});
             const originalImageTensor = tf.image.resizeBilinear(tf.browser.fromPixels(originalImageCanvas), [1024, 1024]).reshape([1024*1024, 3]).concat(tf.ones([1024*1024, 1], 'float32').mul(255), 1);
             const maskImageData = output['masks'].toImageData();
@@ -277,7 +266,10 @@ export default function App() {
             let maskTensor = tf.tensor(maskImageData.data, [maskImageData.data.length/4, 4], 'float32');
             maskTensor = maskTensor.slice([0,0], [-1, 3]);
             maskTensor = maskTensor.notEqual(0).any(1).cast('int32').reshape([maskImageData.data.length/4, 1]).tile([1,4]);
+            console.log(maskTensor.dataSync());
             let resultTensor = maskTensor.mul(originalImageTensor); 
+            console.log(originalImageTensor.dataSync());
+            console.log(resultTensor.dataSync());
             resultTensor = tf.image.resizeBilinear(resultTensor.reshape([1024, 1024, 4]), [originalHeight, originalWidth]);
             const resultImageData = new ImageData(new Uint8ClampedArray(await resultTensor.data()), originalWidth, originalHeight);
 
@@ -302,9 +294,9 @@ export default function App() {
             
             selectedImage.current.points.dispose();
             selectedImage.current.points = null;
+
             images.current.push({ fabricImage: image, embed: null, points: null });
             canvas.add(image);
-
             canvas.setActiveObject(image);
 
             originalImageTensor.dispose();
