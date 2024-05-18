@@ -129,7 +129,7 @@ export default function App() {
     }
 
     //culprit, i wasnt scaling the image to 1024x1024 properly, ort.Tensor resize was just adding border 
-    async function encode(image: ImageObject) {
+    async function encode(image: ImageObject): ort.Tensor {
         const imageTensor = tf.image.resizeBilinear(tf.browser.fromPixels(image.fabricImage.getElement()), [1024, 1024]).concat(tf.ones([1024, 1024, 1], 'float32').mul(255), 2);
         const imageData = new ImageData(new Uint8ClampedArray(await imageTensor.data()), 1024, 1024);
         imageTensor.dispose();
@@ -139,12 +139,12 @@ export default function App() {
 
         const output = await encoderSession.current.run(encoder_inputs);
         const image_embedding = output['image_embeddings'];
-        image.embed = image_embedding;
+        return image_embedding;
 
         imageDataTensor.dispose();
     }
 
-    async function decode(image: ImageObject) {
+    async function decode(image: ImageObject): ort.Tensor {
         const input_points = image.points;
         const additional_point = tf.tensor([[0.0, 0.0]], [1,2], 'float32')
         const point_coords = tf.concat([input_points, additional_point]).expandDims(0);
@@ -236,7 +236,6 @@ export default function App() {
                 });
                 canvas.add(imgInstance);
                 images.current.push({ fabricImage: imgInstance, embed: null, points: null });
-                await encode(images.current[images.current.length - 1]);
             }
             image.src = eventReader.target.result;
         };
@@ -253,7 +252,7 @@ export default function App() {
             const originalHeight = selectedImage.current.fabricImage.height;
 
             if (selectedImage.current.embed == null) {
-                await encode(selectedImage.current);
+                selectedImage.current.embed = await encode(selectedImage.current);
             }
             //get mask
             const output = await decode(selectedImage.current);
