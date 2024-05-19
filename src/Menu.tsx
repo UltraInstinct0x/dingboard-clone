@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { SlPuzzle, SlTrash, CiEraser } from "react-icons/sl";
 import { BsEraser } from "react-icons/bs";
 
@@ -16,18 +16,24 @@ function Button({ Icon, onClick}: ButtonProps) {
 }
 
 export default function Menu({image}) {
-
     const [top, setTop] = useState(null);
     const [left, setLeft] = useState(null);
 
-    console.log(image);
+    useEffect(() => {
+        if (image === null) {
+            return;
+        }
+        setTop(image.fabricImage.top);
+        setLeft(image.fabricImage.left);
+    }, [image]);
+
     if (!image) {
         return null;
     }
 
     return (
         <>
-            <div className="absolute z-10">
+            <div className="absolute" style={{top: top, left: left}}>
                 <Button Icon={SlPuzzle} onClick={() => { console.log('clicked') }} />
                 <Button Icon={SlTrash} />
                 <Button Icon={BsEraser} />

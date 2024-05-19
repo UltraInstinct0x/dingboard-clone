@@ -1,21 +1,12 @@
-import { useCallback, useRef, useEffect  } from "react";
+import { useCallback, useRef, useEffect, useState  } from "react";
 import * as tf from '@tensorflow/tfjs';
 import * as ort from 'onnxruntime-web/webgpu';
 import { fabric } from 'fabric';
+import Menu from './Menu';
+import { encode, decode } from './models';
+import { ImageObject, CustomCanvas } from './interfaces';
+import { findBoundingBox } from './utils';
 
-interface ImageObject {
-    fabricImage: fabric.Image;
-    embed: ort.Tensor | null;
-    points: tf.Tensor2D | null;
-}
-interface CustomCanvas extends fabric.Canvas {
-    lastPosX: number;
-    lastPosY: number;
-    isDragging: boolean;
-}
-interface CanvasProps {
-      canvasIn: React.MutableRefObject<fabric.Canvas | null>;
-}
 const useFabric = (canvas: React.MutableRefObject<fabric.Canvas | null>) => {
     const fabricRef = useCallback((element: HTMLCanvasElement | null) => {
         if (!element) {
@@ -26,7 +17,10 @@ const useFabric = (canvas: React.MutableRefObject<fabric.Canvas | null>) => {
     return fabricRef;
 }
 ort.env.wasm.wasmPaths = '/wasm-files/'
-export default function Canvas({ canvasIn }: CanvasProps) {
+
+export default function Canvas() {
+    const canvasIn = useRef<fabric.Canvas | null>(null);
+    const [menuData, setMenuData] = useState<ImageObject | null>(null);
     const canvasRef = useFabric(canvasIn);
     const images = useRef<ImageObject[]>([]);
     const selectedImage = useRef<ImageObject | null>(null);
@@ -35,6 +29,7 @@ export default function Canvas({ canvasIn }: CanvasProps) {
 
     useEffect(() => {
         const canvas = canvasIn.current as CustomCanvas;
+        canvas.setDimensions({ width: window.innerWidth, height: window.innerHeight });
         canvas.on('mouse:down', handleOnMouseDown);
         canvas.on('dragover', handleDragOver);
         canvas.on('drop', handleOnDrop);
@@ -67,18 +62,13 @@ export default function Canvas({ canvasIn }: CanvasProps) {
             }
         };
         document.addEventListener('visibilitychange', handleVisibilityChange);
-        return () => {
-            document.removeEventListener('visibilitychange', handleVisibilityChange);
-        };
-    }, []);
-
-    useEffect(() => {
         window.addEventListener('keydown', handleOnKeyDown);
         return () => {
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
             window.removeEventListener('keydown', handleOnKeyDown);
         };
     }, []);
-    
+
     useEffect(() => {
         async function loadModels() {
             try {
@@ -98,7 +88,7 @@ export default function Canvas({ canvasIn }: CanvasProps) {
             }
         };
     }, []);
-
+    
     function handleSelectionClear() {
         selectedImage.current = null;
     }
@@ -116,6 +106,7 @@ export default function Canvas({ canvasIn }: CanvasProps) {
             });
         }
     }
+
     function handleMouseDown(this: CustomCanvas, opt: fabric.IEvent) {
       const evt = opt.e as MouseEvent;
       if (evt.metaKey === true) {
@@ -159,76 +150,6 @@ export default function Canvas({ canvasIn }: CanvasProps) {
       e.preventDefault();
       e.stopPropagation();
     }
-
-    //culprit, i wasnt scaling the image to 1024x1024 properly, ort.Tensor resize was just adding border 
-    async function encode(image: ImageObject): Promise<ort.Tensor> {
-        const imageTensor = tf.image.resizeBilinear(tf.browser.fromPixels(image.fabricImage.getElement()), [1024, 1024]).concat(tf.ones([1024, 1024, 1], 'float32').mul(255), 2);
-        const imageData = new ImageData(new Uint8ClampedArray(await imageTensor.data()), 1024, 1024);
-        imageTensor.dispose();
-        const imageDataTensor = await ort.Tensor.fromImage(imageData);
-
-        const encoder_inputs = { "input_image": imageDataTensor };
-
-        const session = encoderSession.current ? encoderSession.current as ort.InferenceSession : null;
-        if (session == null) {
-            throw new Error('encoder not loaded');
-        }
-        const output = await session.run(encoder_inputs);
-        const image_embedding = output['image_embeddings'];
-        return image_embedding;
-
-        imageDataTensor.dispose();
-    }
-
-    async function decode(image: ImageObject): Promise<ort.InferenceSession.OnnxValueMapType> {
-        const input_points = image.points as tf.Tensor2D;
-        const additional_point = tf.tensor([[0.0, 0.0]], [1,2], 'float32')
-        const point_coords = tf.concat([input_points, additional_point]).expandDims(0);
-        const point_coords_ortTensor = new ort.Tensor('float32', new Float32Array(await point_coords.data()), point_coords.shape);
-
-        const point_labels_points = tf.ones([input_points.shape[0]], 'float32');
-        const point_labels = tf.concat([point_labels_points, tf.tensor([0], undefined, 'float32')]).expandDims(0);
-        const point_labels_ortTensor = new ort.Tensor('float32', new Float32Array(await point_labels.data()), point_labels.shape);
-
-        const mask_input = tf.zeros([1,1,256,256], 'float32');
-        const mask_input_ortTensor = new ort.Tensor('float32', new Float32Array(await mask_input.data()), mask_input.shape);
-        const has_mask_input = tf.zeros([1], 'float32');
-        const has_mask_input_ortTensor = new ort.Tensor('float32', new Float32Array(await has_mask_input.data()), has_mask_input.shape);
-
-        const orig_im_size = tf.tensor([1024, 1024], undefined, 'float32');
-        const orig_im_size_typedArray = new Float32Array(await orig_im_size.data());
-        const orig_im_size_ortTensor = new ort.Tensor('float32', orig_im_size_typedArray, orig_im_size.shape);
-
-        const decoder_inputs = {
-            "image_embeddings": image.embed,
-            "point_coords": point_coords_ortTensor,
-            "point_labels": point_labels_ortTensor,
-            "mask_input": mask_input_ortTensor,
-            "has_mask_input": has_mask_input_ortTensor,
-            "orig_im_size": orig_im_size_ortTensor 
-        } as ort.InferenceSession.OnnxValueMapType;
-
-        const session = decoderSession.current ? decoderSession.current as ort.InferenceSession : null;
-        if (session == null) {
-            throw new Error('decoder not loaded');
-        }
-        const output = await session.run(decoder_inputs) as ort.InferenceSession.OnnxValueMapType;
-
-        additional_point.dispose();
-        point_labels_points.dispose();
-        point_labels.dispose();
-        mask_input.dispose();
-        has_mask_input.dispose();
-        orig_im_size.dispose();
-
-        point_coords_ortTensor.dispose();
-        point_labels_ortTensor.dispose();
-        mask_input_ortTensor.dispose();
-        has_mask_input_ortTensor.dispose();
-        orig_im_size_ortTensor.dispose();
-
-        return output;
-    }   
 
     function handleOnMouseDown(this: CustomCanvas, opt: fabric.IEvent) {
         const e = opt.e as MouseEvent;
@@ -305,10 +226,10 @@ export default function Canvas({ canvasIn }: CanvasProps) {
             const originalHeight = originalImage.height as number;
 
             if (current.embed == null) {
-                current.embed = await encode(current);
+                current.embed = await encode(current, encoderSession);
             }
             //get mask
-            const output = await decode(current);
+            const output = await decode(current, decoderSession);
 
             //apply mask to image, TODO: toCanvasElement returns 0,0,0,255 when transparent, turning it black
             const originalImageCanvas = originalImage.toCanvasElement({withoutTransform: true});
@@ -357,48 +278,14 @@ export default function Canvas({ canvasIn }: CanvasProps) {
         }
     }
 
-    function findBoundingBox(tensor: tf.Tensor3D) {
-        const [height, width, _] = tensor.shape;
-        return tf.tidy(() => {  
-            const mask = tensor.slice([0,0,3]);
-            const opaqueMask = mask.greater(tf.scalar(0));
-            const rowMaskArray = opaqueMask.any(1).arraySync() as number[][];
-            const colMaskArray = opaqueMask.any(0).arraySync() as number[][];
-
-            const boundingBox = {minX: 0, minY: 0, maxX: 0, maxY: 0};
-            for (let i=0;i<height;i++) {
-                if (rowMaskArray[i][0]) {
-                    boundingBox.minY = i;
-                    break;
-                }
-            }
-            for (let i=height-1;i>=0;i--) {
-                if (rowMaskArray[i][0]) {
-                    boundingBox.maxY = i;
-                    break;
-                }
-            }
-            for (let i=0;i<width;i++) {
-                if (colMaskArray[i][0]) {
-                    boundingBox.minX = i;
-                    break;
-                }
-            }
-            for (let i=width-1;i>=0;i--) {
-                if (colMaskArray[i][0]) {
-                    boundingBox.maxX = i;
-                    break;
-                }
-            }
-            return boundingBox;
-        });
-
-    }
-
-
     return (
-        <>
-            <canvas id="canvas" ref={canvasRef} width={window.innerWidth} height={window.innerHeight} tabIndex={0}/> 
-        </>
+        <div>
+            <div>
+                <canvas id="canvas" ref={canvasRef} tabIndex={0}/> 
+            </div>
+            <div> 
+                <Menu image={menuData}/>
+            </div>
+        </div>
     );
 }
