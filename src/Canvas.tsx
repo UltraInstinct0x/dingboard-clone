@@ -1,8 +1,7 @@
-import { useCallback, useRef, useEffect, useState } from "react";
+import { useCallback, useRef, useEffect  } from "react";
 import * as tf from '@tensorflow/tfjs';
 import * as ort from 'onnxruntime-web/webgpu';
 import { fabric } from 'fabric';
-import Menu from './Menu';
 
 interface ImageObject {
     fabricImage: fabric.Image;
@@ -14,15 +13,20 @@ interface CustomCanvas extends fabric.Canvas {
     lastPosY: number;
     isDragging: boolean;
 }
-const useFabric = (canvas) => {
-    const fabricRef = useCallback((element) => {
-        if (!element) return canvas.current?.dispose();
+interface CanvasProps {
+      canvasIn: React.MutableRefObject<fabric.Canvas | null>;
+}
+const useFabric = (canvas: React.MutableRefObject<fabric.Canvas | null>) => {
+    const fabricRef = useCallback((element: HTMLCanvasElement | null) => {
+        if (!element) {
+            return canvas.current?.dispose();
+        }
         canvas.current = new fabric.Canvas(element, {backgroundColor: 'Gainsboro', preserveObjectStacking: true});
     }, []);
     return fabricRef;
 }
 ort.env.wasm.wasmPaths = '/wasm-files/'
-export default function Canvas({canvasIn}) {
+export default function Canvas({ canvasIn }: CanvasProps) {
     const canvasRef = useFabric(canvasIn);
     const images = useRef<ImageObject[]>([]);
     const selectedImage = useRef<ImageObject | null>(null);
@@ -36,58 +40,30 @@ export default function Canvas({canvasIn}) {
         canvas.on('drop', handleOnDrop);
         canvas.on('selection:updated', handleSelection);
         canvas.on('selection:created', handleSelection);            
-        canvas.on('selection:cleared', () => {
-            selectedImage.current = null;
-        });
-        canvas.on('mouse:down', function(opt: fabric.IEvent) {
-          const evt = opt.e as MouseEvent;
-          if (evt.metaKey === true) {
-            canvas.isDragging = true;
-            canvas.selection = false;
-            canvas.lastPosX = evt.clientX;
-            canvas.lastPosY = evt.clientY;
-          }
-        });
-        canvas.on('mouse:move', function(opt: fabric.IEvent) {
-            if (canvas.isDragging) {
-                const e = opt.e as MouseEvent;
-                const vpt = canvas.viewportTransform;
-                if (vpt) {
-                    vpt[4] += e.clientX - canvas.lastPosX;
-                    vpt[5] += e.clientY - canvas.lastPosY;
-                }
-                canvas.requestRenderAll();
-                canvas.lastPosX = e.clientX;
-                canvas.lastPosY = e.clientY;
-            }
-        });
-        canvas.on('mouse:up', function() {
-          // on mouse up we want to recalculate new interaction
-            // for all objects, so we call setViewportTransform
-            const viewportTransform = canvas.viewportTransform as number[];
-            canvas.setViewportTransform(viewportTransform);
-            canvas.isDragging = false;
-            canvas.selection = true;
-        });
-        canvas.on('mouse:wheel', function(opt: fabric.IEvent) {
-          const e = opt.e as WheelEvent;
-          const delta = e.deltaY;
-          let zoom = canvas.getZoom();
-          zoom *= 0.999 ** delta;
-          if (zoom > 20) zoom = 20;
-          if (zoom < 0.01) zoom = 0.01;
-          canvas.zoomToPoint({ x: e.offsetX, y: e.offsetY }, zoom);
-          e.preventDefault();
-          e.stopPropagation();
-        });
-        
+        canvas.on('selection:cleared', handleSelectionClear);
+        canvas.on('mouse:down', handleMouseDown);
+        canvas.on('mouse:move', handleMouseMove);
+        canvas.on('mouse:up', handleMouseUp);
+        canvas.on('mouse:wheel', handleMouseWheel);
         console.log('canvas created');
+      return () => {
+        canvas.off('mouse:down', handleOnMouseDown);
+        canvas.off('dragover', handleDragOver);
+        canvas.off('drop', handleOnDrop);
+        canvas.off('selection:updated', handleSelection);
+        canvas.off('selection:created', handleSelection);            
+        canvas.off('selection:cleared', handleSelectionClear);
+        canvas.off('mouse:down', handleMouseDown);
+        canvas.off('mouse:move', handleMouseMove);
+        canvas.off('mouse:up', handleMouseUp);
+        canvas.off('mouse:wheel', handleMouseWheel);
+        };
     }, []);
 
     useEffect(() => {
         const handleVisibilityChange = () => {
-            if (document.visibilityState === 'visible' && canvasRef.current) {
-                canvasRef.current.requestRenderAll();
+            if (document.visibilityState === 'visible' && canvasIn?.current) {
+                canvasIn?.current?.requestRenderAll();
             }
         };
         document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -123,11 +99,12 @@ export default function Canvas({canvasIn}) {
         };
     }, []);
 
+    function handleSelectionClear() {
+        selectedImage.current = null;
+    }
+
     async function handleSelection(opt: fabric.IEvent) {
-        const selected = opt.selected ? opt.selected[0] as fabric.Image : null;
-        if (selected == null) {
-            return;
-        }
+        const selected = opt.selected![0];
         selectedImage.current = images.current.find((image) => image.fabricImage === selected) as ImageObject;
         const group = selected.group as fabric.Group;
         if (group) {
@@ -138,6 +115,49 @@ export default function Canvas({canvasIn}) {
                 transparentCorners: false
             });
         }
+    }
+    function handleMouseDown(this: CustomCanvas, opt: fabric.IEvent) {
+      const evt = opt.e as MouseEvent;
+      if (evt.metaKey === true) {
+        this.isDragging = true;
+        this.selection = false;
+        this.lastPosX = evt.clientX;
+        this.lastPosY = evt.clientY;
+      }
+    }
+    function handleMouseMove(this: CustomCanvas, opt: fabric.IEvent) {
+        if (this.isDragging) {
+            const e = opt.e as MouseEvent;
+            const vpt = this.viewportTransform;
+            if (vpt) {
+                vpt[4] += e.clientX - this.lastPosX;
+                vpt[5] += e.clientY - this.lastPosY;
+            }
+            this.requestRenderAll();
+            this.lastPosX = e.clientX;
+            this.lastPosY = e.clientY;
+        }
+    }
+    function handleMouseUp(this: CustomCanvas) {
+        this.isDragging = false;
+        this.selection = true;
+      // on mouse up we want to recalculate new interaction
+        // for all objects, so we call setViewportTransform
+        const viewportTransform = this.viewportTransform as number[];
+        this.setViewportTransform(viewportTransform);
+        this.isDragging = false;
+        this.selection = true;
+    }
+    function handleMouseWheel(this: CustomCanvas, opt: fabric.IEvent) {
+      const e = opt.e as WheelEvent;
+      const delta = e.deltaY;
+      let zoom = this.getZoom();
+      zoom *= 0.999 ** delta;
+      if (zoom > 20) zoom = 20;
+      if (zoom < 0.01) zoom = 0.01;
+      this.zoomToPoint({ x: e.offsetX, y: e.offsetY }, zoom);
+      e.preventDefault();
+      e.stopPropagation();
     }
 
     //culprit, i wasnt scaling the image to 1024x1024 properly, ort.Tensor resize was just adding border 
@@ -210,13 +230,14 @@ export default function Canvas({canvasIn}) {
         return output;
     }   
 
-    function handleOnMouseDown(opt: fabric.IEvent) {
+    function handleOnMouseDown(this: CustomCanvas, opt: fabric.IEvent) {
         const e = opt.e as MouseEvent;
         const currentImage = selectedImage.current as ImageObject;
+
         if (e.shiftKey && currentImage != null) {
 
             //scale the point to the image's local coords then to 1024x1024
-            const mCanvas = canvasIn.current.viewportTransform as number[];
+            const mCanvas = this.viewportTransform as number[];
             const mImage = currentImage.fabricImage.calcTransformMatrix();
             const mTotal = fabric.util.multiplyTransformMatrices(mCanvas, mImage);
             const pointer = opt.pointer as fabric.Point;
@@ -245,14 +266,14 @@ export default function Canvas({canvasIn}) {
         }
     }
 
-    async function handleOnDrop(opt: fabric.IEvent) {
+    async function handleOnDrop(this: CustomCanvas, opt: fabric.IEvent) {
         const e = opt.e as DragEvent;
         e.preventDefault();
 
         const reader = new FileReader();
-        reader.onload = async (eventReader: ProgressEvent<FileReader>) => {
+        reader.onload = (eventReader: ProgressEvent<FileReader>) => {
             const image = new Image();
-            image.onload = async () => {
+            image.onload = () => {
                 const imgInstance = new fabric.Image(image, {
                     left: e.x,
                     top: e.y,
@@ -261,7 +282,7 @@ export default function Canvas({canvasIn}) {
                     cornerStrokeColor: 'black',
                     transparentCorners: false
                 });
-                canvasIn.current.add(imgInstance);
+                canvasIn?.current?.add(imgInstance);
                 images.current.push({ fabricImage: imgInstance, embed: null, points: null });
             }
 
@@ -279,9 +300,9 @@ export default function Canvas({canvasIn}) {
     async function handleOnKeyDown(e: KeyboardEvent) {
         const current = selectedImage.current as ImageObject;
         if (e.key === 'c' && current != null) {
-            const image = current.fabricImage as fabric.Image;
-            const originalWidth = image.width as number;
-            const originalHeight = image.height as number;
+            const originalImage = current.fabricImage as fabric.Image;
+            const originalWidth = originalImage.width as number;
+            const originalHeight = originalImage.height as number;
 
             if (current.embed == null) {
                 current.embed = await encode(current);
@@ -290,7 +311,7 @@ export default function Canvas({canvasIn}) {
             const output = await decode(current);
 
             //apply mask to image, TODO: toCanvasElement returns 0,0,0,255 when transparent, turning it black
-            const originalImageCanvas = image.toCanvasElement({withoutTransform: true});
+            const originalImageCanvas = originalImage.toCanvasElement({withoutTransform: true});
             const originalImageTensor = tf.image.resizeBilinear(tf.browser.fromPixels(originalImageCanvas), [1024, 1024]).reshape([1024*1024, 3]).concat(tf.ones([1024*1024, 1], 'float32').mul(255), 1);
             const maskImageData = output['masks'].toImageData();
 
@@ -303,8 +324,9 @@ export default function Canvas({canvasIn}) {
 
             //transformations to match the mask on the image on the canvas 
             const boundingBox = findBoundingBox(resultTensor as tf.Tensor3D);
-            const left = image.left as number;
-            const top = image.top as number;
+            const left = originalImage.left as number;
+            const top = originalImage.top as number;
+            // @ts-ignore
             const resImage = new fabric.Image(await createImageBitmap(resultImageData), {
                 left: left + boundingBox.minX,
                 top: top + boundingBox.minY,
@@ -326,8 +348,8 @@ export default function Canvas({canvasIn}) {
             current.points = null;
 
             images.current.push({ fabricImage: resImage, embed: null, points: null });
-            canvasIn.current.add(resImage);
-            canvasIn.current.setActiveObject(resImage);
+            canvasIn?.current?.add(resImage);
+            canvasIn?.current?.setActiveObject(resImage);
 
             originalImageTensor.dispose();
             maskTensor.dispose();
