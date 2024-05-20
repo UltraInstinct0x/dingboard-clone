@@ -1,11 +1,11 @@
-import { useCallback, useRef, useEffect, useState  } from "react";
+import { useCallback, useRef, useEffect } from "react";
 import * as tf from '@tensorflow/tfjs';
 import * as ort from 'onnxruntime-web/webgpu';
 import { fabric } from 'fabric';
 import Menu from './Menu';
 import { encode, decode } from './models';
 import { ImageObject, CustomCanvas } from './interfaces';
-import { findBoundingBox } from './utils';
+import { handleMouseDown, handleMouseMove, handleMouseUp, handleMouseWheel, findBoundingBox } from './utils';
 
 const useFabric = (canvas: React.MutableRefObject<fabric.Canvas | null>) => {
     const fabricRef = useCallback((element: HTMLCanvasElement | null) => {
@@ -13,6 +13,10 @@ const useFabric = (canvas: React.MutableRefObject<fabric.Canvas | null>) => {
             return canvas.current?.dispose();
         }
         canvas.current = new fabric.Canvas(element, {backgroundColor: 'Gainsboro', preserveObjectStacking: true});
+        fabric.Object.prototype.transparentCorners = false;
+        fabric.Object.prototype.cornerColor = 'white';
+        fabric.Object.prototype.cornerStrokeColor = 'black';
+        fabric.Object.prototype.borderColor = 'black';
     }, []);
     return fabricRef;
 }
@@ -20,34 +24,33 @@ ort.env.wasm.wasmPaths = '/wasm-files/'
 
 export default function Canvas() {
     const canvasIn = useRef<fabric.Canvas | null>(null);
-    const [menuData, setMenuData] = useState<ImageObject | null>(null);
     const canvasRef = useFabric(canvasIn);
     const images = useRef<ImageObject[]>([]);
-    const selectedImage = useRef<ImageObject | null>(null);
     const encoderSession = useRef<ort.InferenceSession | null>(null);
     const decoderSession = useRef<ort.InferenceSession | null>(null);
 
     useEffect(() => {
+        //segmentation
+        fabric.Object.prototype.on('mousedown', segment);
+
         const canvas = canvasIn.current as CustomCanvas;
         canvas.setDimensions({ width: window.innerWidth, height: window.innerHeight });
-        canvas.on('mouse:down', handleOnMouseDown);
+
+        //drag and drop images to canvas
         canvas.on('dragover', handleDragOver);
         canvas.on('drop', handleOnDrop);
-        canvas.on('selection:updated', handleSelection);
-        canvas.on('selection:created', handleSelection);            
-        canvas.on('selection:cleared', handleSelectionClear);
+
+        //panning and zooming
         canvas.on('mouse:down', handleMouseDown);
         canvas.on('mouse:move', handleMouseMove);
         canvas.on('mouse:up', handleMouseUp);
         canvas.on('mouse:wheel', handleMouseWheel);
+
         console.log('canvas created');
       return () => {
-        canvas.off('mouse:down', handleOnMouseDown);
+        fabric.Object.prototype.off('mousedown', segment);
         canvas.off('dragover', handleDragOver);
         canvas.off('drop', handleOnDrop);
-        canvas.off('selection:updated', handleSelection);
-        canvas.off('selection:created', handleSelection);            
-        canvas.off('selection:cleared', handleSelectionClear);
         canvas.off('mouse:down', handleMouseDown);
         canvas.off('mouse:move', handleMouseMove);
         canvas.off('mouse:up', handleMouseUp);
@@ -55,6 +58,7 @@ export default function Canvas() {
         };
     }, []);
 
+    //fix for webgpu not rendering when tab is not active
     useEffect(() => {
         const handleVisibilityChange = () => {
             if (document.visibilityState === 'visible' && canvasIn?.current) {
@@ -62,10 +66,8 @@ export default function Canvas() {
             }
         };
         document.addEventListener('visibilitychange', handleVisibilityChange);
-        window.addEventListener('keydown', handleOnKeyDown);
         return () => {
             document.removeEventListener('visibilitychange', handleVisibilityChange);
-            window.removeEventListener('keydown', handleOnKeyDown);
         };
     }, []);
 
@@ -88,14 +90,10 @@ export default function Canvas() {
             }
         };
     }, []);
-    
-    function handleSelectionClear() {
-        selectedImage.current = null;
-    }
 
-    async function handleSelection(opt: fabric.IEvent) {
+    function handleSelection(opt: fabric.IEvent) {
+        /*
         const selected = opt.selected![0];
-        selectedImage.current = images.current.find((image) => image.fabricImage === selected) as ImageObject;
         const group = selected.group as fabric.Group;
         if (group) {
             group.set({
@@ -105,60 +103,15 @@ export default function Canvas() {
                 transparentCorners: false
             });
         }
+        */
     }
 
-    function handleMouseDown(this: CustomCanvas, opt: fabric.IEvent) {
-      const evt = opt.e as MouseEvent;
-      if (evt.metaKey === true) {
-        this.isDragging = true;
-        this.selection = false;
-        this.lastPosX = evt.clientX;
-        this.lastPosY = evt.clientY;
-      }
-    }
-    function handleMouseMove(this: CustomCanvas, opt: fabric.IEvent) {
-        if (this.isDragging) {
-            const e = opt.e as MouseEvent;
-            const vpt = this.viewportTransform;
-            if (vpt) {
-                vpt[4] += e.clientX - this.lastPosX;
-                vpt[5] += e.clientY - this.lastPosY;
-            }
-            this.requestRenderAll();
-            this.lastPosX = e.clientX;
-            this.lastPosY = e.clientY;
-        }
-    }
-    function handleMouseUp(this: CustomCanvas) {
-        this.isDragging = false;
-        this.selection = true;
-      // on mouse up we want to recalculate new interaction
-        // for all objects, so we call setViewportTransform
-        const viewportTransform = this.viewportTransform as number[];
-        this.setViewportTransform(viewportTransform);
-        this.isDragging = false;
-        this.selection = true;
-    }
-    function handleMouseWheel(this: CustomCanvas, opt: fabric.IEvent) {
-      const e = opt.e as WheelEvent;
-      const delta = e.deltaY;
-      let zoom = this.getZoom();
-      zoom *= 0.999 ** delta;
-      if (zoom > 20) zoom = 20;
-      if (zoom < 0.01) zoom = 0.01;
-      this.zoomToPoint({ x: e.offsetX, y: e.offsetY }, zoom);
-      e.preventDefault();
-      e.stopPropagation();
-    }
-
-    function handleOnMouseDown(this: CustomCanvas, opt: fabric.IEvent) {
+    function segment(opt: fabric.IEvent) {
         const e = opt.e as MouseEvent;
-        const currentImage = selectedImage.current as ImageObject;
-
-        if (e.shiftKey && currentImage != null) {
-
+        const currentImage = images.current.find((image) => image.fabricImage === opt.target);
+        if (e.shiftKey && currentImage) {
             //scale the point to the image's local coords then to 1024x1024
-            const mCanvas = this.viewportTransform as number[];
+            const mCanvas = currentImage.fabricImage.canvas?.viewportTransform as number[];
             const mImage = currentImage.fabricImage.calcTransformMatrix();
             const mTotal = fabric.util.multiplyTransformMatrices(mCanvas, mImage);
             const pointer = opt.pointer as fabric.Point;
@@ -184,7 +137,61 @@ export default function Canvas() {
             } else {
                 currentImage.points = tf.concat([currentImage.points, tf.tensor([[newX, newY]], [1, 2], 'float32')], 0) as tf.Tensor2D;
             }
+            encodeDecode(currentImage);
         }
+    }
+
+    async function encodeDecode(current: ImageObject) {
+        const originalImage = current.fabricImage as fabric.Image;
+        const originalWidth = originalImage.width as number;
+        const originalHeight = originalImage.height as number;
+
+        if (current.embed == null) {
+            current.embed = await encode(current, encoderSession);
+        }
+        //get mask
+        const output = await decode(current, decoderSession);
+
+        //apply mask to image, TODO: toCanvasElement returns 0,0,0,255 when transparent, turning it black
+        const originalImageCanvas = originalImage.toCanvasElement({withoutTransform: true});
+        const originalImageTensor = tf.image.resizeBilinear(tf.browser.fromPixels(originalImageCanvas), [1024, 1024]).reshape([1024*1024, 3]).concat(tf.ones([1024*1024, 1], 'float32').mul(255), 1);
+        const maskImageData = output['masks'].toImageData();
+
+        let maskTensor = tf.tensor(maskImageData.data, [maskImageData.data.length/4, 4], 'float32');
+        maskTensor = maskTensor.slice([0,0], [-1, 3]);
+        maskTensor = maskTensor.notEqual(0).any(1).cast('int32').reshape([maskImageData.data.length/4, 1]).tile([1,4]);
+        let resultTensor = maskTensor.mul(originalImageTensor); 
+        resultTensor = tf.image.resizeBilinear(resultTensor.reshape([1024, 1024, 4]) as tf.Tensor3D, [originalHeight, originalWidth]);
+        const resultImageData = new ImageData(new Uint8ClampedArray(await resultTensor.data()), originalWidth, originalHeight);
+
+        //transformations to match the mask on the image on the canvas 
+        const boundingBox = findBoundingBox(resultTensor as tf.Tensor3D);
+        const left = originalImage.left as number;
+        const top = originalImage.top as number;
+        // @ts-ignore
+        const resImage = new fabric.Image(await createImageBitmap(resultImageData), {
+            left: left + boundingBox.minX,
+            top: top + boundingBox.minY,
+            cropX: boundingBox.minX,
+            cropY: boundingBox.minY,
+            width: boundingBox.maxX - boundingBox.minX,
+            height: boundingBox.maxY - boundingBox.minY,
+        });
+        const mImage = originalImage.calcTransformMatrix();
+        const opt = fabric.util.qrDecompose(mImage);
+        resImage.set(opt);
+       
+        const points = current.points as tf.Tensor2D;
+        points.dispose();
+        current.points = null;
+
+        images.current.push({ fabricImage: resImage, embed: null, points: null });
+        canvasIn?.current?.add(resImage);
+        canvasIn?.current?.setActiveObject(resImage);
+
+        originalImageTensor.dispose();
+        maskTensor.dispose();
+        resultTensor.dispose();
     }
 
     async function handleOnDrop(this: CustomCanvas, opt: fabric.IEvent) {
@@ -198,10 +205,7 @@ export default function Canvas() {
                 const imgInstance = new fabric.Image(image, {
                     left: e.x,
                     top: e.y,
-                    borderColor: 'black',
-                    cornerColor: 'white',
-                    cornerStrokeColor: 'black',
-                    transparentCorners: false
+                
                 });
                 canvasIn?.current?.add(imgInstance);
                 images.current.push({ fabricImage: imgInstance, embed: null, points: null });
@@ -218,65 +222,6 @@ export default function Canvas() {
          opt.e.preventDefault();
      }
 
-    async function handleOnKeyDown(e: KeyboardEvent) {
-        const current = selectedImage.current as ImageObject;
-        if (e.key === 'c' && current != null) {
-            const originalImage = current.fabricImage as fabric.Image;
-            const originalWidth = originalImage.width as number;
-            const originalHeight = originalImage.height as number;
-
-            if (current.embed == null) {
-                current.embed = await encode(current, encoderSession);
-            }
-            //get mask
-            const output = await decode(current, decoderSession);
-
-            //apply mask to image, TODO: toCanvasElement returns 0,0,0,255 when transparent, turning it black
-            const originalImageCanvas = originalImage.toCanvasElement({withoutTransform: true});
-            const originalImageTensor = tf.image.resizeBilinear(tf.browser.fromPixels(originalImageCanvas), [1024, 1024]).reshape([1024*1024, 3]).concat(tf.ones([1024*1024, 1], 'float32').mul(255), 1);
-            const maskImageData = output['masks'].toImageData();
-
-            let maskTensor = tf.tensor(maskImageData.data, [maskImageData.data.length/4, 4], 'float32');
-            maskTensor = maskTensor.slice([0,0], [-1, 3]);
-            maskTensor = maskTensor.notEqual(0).any(1).cast('int32').reshape([maskImageData.data.length/4, 1]).tile([1,4]);
-            let resultTensor = maskTensor.mul(originalImageTensor); 
-            resultTensor = tf.image.resizeBilinear(resultTensor.reshape([1024, 1024, 4]) as tf.Tensor3D, [originalHeight, originalWidth]);
-            const resultImageData = new ImageData(new Uint8ClampedArray(await resultTensor.data()), originalWidth, originalHeight);
-
-            //transformations to match the mask on the image on the canvas 
-            const boundingBox = findBoundingBox(resultTensor as tf.Tensor3D);
-            const left = originalImage.left as number;
-            const top = originalImage.top as number;
-            // @ts-ignore
-            const resImage = new fabric.Image(await createImageBitmap(resultImageData), {
-                left: left + boundingBox.minX,
-                top: top + boundingBox.minY,
-                cropX: boundingBox.minX,
-                cropY: boundingBox.minY,
-                width: boundingBox.maxX - boundingBox.minX,
-                height: boundingBox.maxY - boundingBox.minY,
-                borderColor: 'black',
-                cornerColor: 'white',
-                cornerStrokeColor: 'black',
-                transparentCorners: false
-            });
-            const mImage = resImage.calcTransformMatrix();
-            const opt = fabric.util.qrDecompose(mImage);
-            resImage.set(opt);
-           
-            const points = current.points as tf.Tensor2D;
-            points.dispose();
-            current.points = null;
-
-            images.current.push({ fabricImage: resImage, embed: null, points: null });
-            canvasIn?.current?.add(resImage);
-            canvasIn?.current?.setActiveObject(resImage);
-
-            originalImageTensor.dispose();
-            maskTensor.dispose();
-            resultTensor.dispose();
-        }
-    }
 
     return (
         <div>
@@ -284,7 +229,7 @@ export default function Canvas() {
                 <canvas id="canvas" ref={canvasRef} tabIndex={0}/> 
             </div>
             <div> 
-                <Menu image={menuData}/>
+                <Menu canvas={canvasIn}/>
             </div>
         </div>
     );
