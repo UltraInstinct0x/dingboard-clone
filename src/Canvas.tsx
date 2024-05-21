@@ -29,10 +29,15 @@ export default function Canvas() {
     const encoderSession = useRef<ort.InferenceSession | null>(null);
     const decoderSession = useRef<ort.InferenceSession | null>(null);
     const [menuProps, setMenuProps] = useState<{ top: number | null, left: number | null }>({ top: null, left: null});
+    const [isSegment, setIsSegment] = useState(false);
+    const isSegmentRef = useRef(isSegment);
+
+    useEffect(() => {
+        isSegmentRef.current = isSegment;
+    }, [isSegment]);
     useEffect(() => {
         //segmentation
         fabric.Object.prototype.on('mousedown', segment);
-        //menu
 
         const canvas = canvasIn.current as CustomCanvas;
         canvas.setDimensions({ width: window.innerWidth, height: window.innerHeight });
@@ -101,6 +106,7 @@ export default function Canvas() {
 
     function hideMenu() {
         setMenuProps({ top: null, left: null });
+        setIsSegment(false);
     }
 
     function updateMenu(opt: fabric.IEvent) {
@@ -124,7 +130,9 @@ export default function Canvas() {
     function segment(opt: fabric.IEvent) {
         const e = opt.e as MouseEvent;
         const currentImage = images.current.find((image) => image.fabricImage === opt.target);
-        if (e.shiftKey && currentImage) {
+        if (isSegmentRef.current && currentImage) {
+            setIsSegment(false);
+            console.log('segmenting');
             //scale the point to the image's local coords then to 1024x1024
             const mCanvas = currentImage.fabricImage.canvas?.viewportTransform as number[];
             const mImage = currentImage.fabricImage.calcTransformMatrix();
@@ -237,14 +245,13 @@ export default function Canvas() {
          opt.e.preventDefault();
      }
 
-
     return (
         <div>
             <div>
                 <canvas id="canvas" ref={canvasRef} tabIndex={0}/> 
             </div>
             <div> 
-                <Menu top={menuProps.top} left={menuProps.left} />
+                <Menu top={menuProps.top} left={menuProps.left} isSegment={isSegment} setIsSegment={setIsSegment}/>
             </div>
         </div>
     );

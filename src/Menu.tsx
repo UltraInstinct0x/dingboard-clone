@@ -7,24 +7,27 @@ interface ButtonProps {
     onClick?: () => void
 }
 
-function Button({ Icon, onClick}: ButtonProps) {
+function Button({ Icon, isActive, onClick}: ButtonProps) {
+
     return (
-        <button className="bg-slate-700 hover:bg-slate-800 active:bg-slate-900 focus:bg-slate-800 py-1 px-1 focus:outline-slate-700 rounded-none" onClick={onClick}>
+        <div className={`${isActive ? "bg-slate-900" : "bg-slate-700"} hover:bg-slate-800 active:bg-slate-700 py-1 px-1 rounded-none`} onClick={onClick}>
             <Icon />
-        </button>
+        </div>
     )
 }
 
-export default function Menu({top, left}) {
-
+export default function Menu({top, left, isSegment,  setIsSegment}) {
     if (top == null || left == null) {
         return null;
+    }
+    function onClick() {
+        setIsSegment((prev) => !prev);
     }
 
     return (
         <>
-            <div className="absolute" style={{top: top, left: left}}>
-                <Button Icon={SlPuzzle} onClick={() => { console.log('clicked') }} />
+            <div className="absolute flex" style={{top: top, left: left}}>
+                <Button Icon={SlPuzzle} isActive={isSegment===true} onClick={onClick} />
                 <Button Icon={SlTrash} />
                 <Button Icon={BsEraser} />
             </div>
