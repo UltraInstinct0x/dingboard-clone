@@ -1,4 +1,4 @@
-import { useCallback, useRef, useEffect } from "react";
+import { useCallback, useRef, useEffect, useState } from "react";
 import * as tf from '@tensorflow/tfjs';
 import * as ort from 'onnxruntime-web/webgpu';
 import { fabric } from 'fabric';
@@ -28,13 +28,18 @@ export default function Canvas() {
     const images = useRef<ImageObject[]>([]);
     const encoderSession = useRef<ort.InferenceSession | null>(null);
     const decoderSession = useRef<ort.InferenceSession | null>(null);
-
+    const [menuProps, setMenuProps] = useState<{ top: number | null, left: number | null }>({ top: null, left: null});
     useEffect(() => {
         //segmentation
         fabric.Object.prototype.on('mousedown', segment);
+        //menu
 
         const canvas = canvasIn.current as CustomCanvas;
         canvas.setDimensions({ width: window.innerWidth, height: window.innerHeight });
+
+        canvas.on('selection:created', updateMenu);
+        canvas.on('selection:updated', updateMenu);
+        canvas.on('selection:cleared', hideMenu);
 
         //drag and drop images to canvas
         canvas.on('dragover', handleDragOver);
@@ -49,6 +54,9 @@ export default function Canvas() {
         console.log('canvas created');
       return () => {
         fabric.Object.prototype.off('mousedown', segment);
+        canvas.off('selection:created', updateMenu);
+        canvas.off('selection:updated', updateMenu);
+        canvas.off('selection:cleared', hideMenu);
         canvas.off('dragover', handleDragOver);
         canvas.off('drop', handleOnDrop);
         canvas.off('mouse:down', handleMouseDown);
@@ -91,19 +99,26 @@ export default function Canvas() {
         };
     }, []);
 
-    function handleSelection(opt: fabric.IEvent) {
-        /*
+    function hideMenu() {
+        setMenuProps({ top: null, left: null });
+    }
+
+    function updateMenu(opt: fabric.IEvent) {
         const selected = opt.selected![0];
-        const group = selected.group as fabric.Group;
-        if (group) {
-            group.set({
-                borderColor: 'black',
-                cornerColor: 'white',
-                cornerStrokeColor: 'black',
-                transparentCorners: false
-            });
+
+        function getGlobalCoords(source: fabric.Object): fabric.Point {
+            const mCanvas = source.canvas?.viewportTransform as number[];
+            const point = new fabric.Point(source.left as number, source.top as number);
+            return fabric.util.transformPoint(point, mCanvas);
         }
-        */
+        let point;
+
+        if (selected?.group) {
+            point = getGlobalCoords(selected.group);
+        } else {
+            point = getGlobalCoords(selected);
+        }
+        setMenuProps({ top: point.y as number - 30, left: point.x as number });
     }
 
     function segment(opt: fabric.IEvent) {
@@ -229,7 +244,7 @@ export default function Canvas() {
                 <canvas id="canvas" ref={canvasRef} tabIndex={0}/> 
             </div>
             <div> 
-                <Menu canvas={canvasIn}/>
+                <Menu top={menuProps.top} left={menuProps.left} />
             </div>
         </div>
     );

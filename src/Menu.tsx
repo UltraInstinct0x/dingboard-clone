@@ -15,19 +15,9 @@ function Button({ Icon, onClick}: ButtonProps) {
     )
 }
 
-export default function Menu({image, canvas}) {
-    const [top, setTop] = useState(0);
-    const [left, setLeft] = useState(0);
+export default function Menu({top, left}) {
 
-    useEffect(() => {
-        if (image === null) {
-            return;
-        }
-        //setTop(image.fabricImage.top);
-        //setLeft(image.fabricImage.left);
-    }, [image]);
-
-    if (!image) {
+    if (top == null || left == null) {
         return null;
     }
 
