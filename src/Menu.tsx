@@ -1,13 +1,14 @@
-import { useState, useEffect } from "react";
-import { SlPuzzle, SlTrash, CiEraser } from "react-icons/sl";
+import { SlPuzzle, SlTrash } from "react-icons/sl";
 import { BsEraser } from "react-icons/bs";
+import { FaRegObjectGroup, FaRegObjectUngroup } from "react-icons/fa";
 
 interface ButtonProps {
     Icon: React.ComponentType
-    onClick?: () => void
+    onClick: () => void
+    isActive?: boolean
 }
 
-function Button({ Icon, isActive, onClick}: ButtonProps) {
+function Button({ Icon, isActive = false, onClick}: ButtonProps) {
 
     return (
         <div className={`${isActive ? "bg-slate-900" : "bg-slate-700"} hover:bg-slate-800 active:bg-slate-700 py-1 px-1 rounded-none`} onClick={onClick}>
@@ -16,7 +17,7 @@ function Button({ Icon, isActive, onClick}: ButtonProps) {
     )
 }
 
-export default function Menu({top, left, isSegment,  setIsSegment, setDeleteSelection}) {
+export default function Menu({top, left, isSegment,  setIsSegment, setDeleteSelection, setGroup, setUngroup}) {
     if (top == null || left == null) {
         return null;
     }
@@ -26,13 +27,20 @@ export default function Menu({top, left, isSegment,  setIsSegment, setDeleteSele
     function onClickDelete() {
         setDeleteSelection(true);
     }
+    function onClickGroup() {
+        setGroup(true);
+    }
+    function onClickUngroup() {
+        setUngroup(true);
+    }
 
     return (
         <>
             <div className="absolute flex" style={{top: top, left: left}}>
                 <Button Icon={SlPuzzle} isActive={isSegment===true} onClick={onClickSegment} />
                 <Button Icon={SlTrash}  onClick={onClickDelete}/>
-                <Button Icon={BsEraser} />
+                <Button Icon={FaRegObjectGroup} onClick={onClickGroup}/>
+                <Button Icon={FaRegObjectUngroup} onClick={onClickUngroup}/>
             </div>
         </>
     )

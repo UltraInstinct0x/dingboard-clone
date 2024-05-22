@@ -2,7 +2,7 @@ import * as tf from '@tensorflow/tfjs';
 import * as ort from 'onnxruntime-web/webgpu';
 
 interface ImageObject {
-    fabricImage: fabric.Image;
+    fabricImage: fabric.Object;
     embed: ort.Tensor | null;
     points: tf.Tensor2D | null;
 }

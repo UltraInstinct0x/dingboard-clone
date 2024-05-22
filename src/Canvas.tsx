@@ -32,6 +32,8 @@ export default function Canvas() {
     const [isSegment, setIsSegment] = useState(false);
     const [deleteSelection, setDeleteSelection] = useState(false);
     const isSegmentRef = useRef(isSegment);
+    const [group, setGroup] = useState(false);
+    const [ungroup, setUngroup] = useState(false);
 
     useEffect(() => {
         isSegmentRef.current = isSegment;
@@ -42,7 +44,6 @@ export default function Canvas() {
 
         const canvas = canvasIn.current as CustomCanvas;
         canvas.setDimensions({ width: window.innerWidth, height: window.innerHeight });
-
 
         fabric.Object.prototype.on('moving', updateMenu);
         canvas.on('selection:created', updateMenu);
@@ -75,7 +76,13 @@ export default function Canvas() {
 
         setMenuProps({ top: null, left: null });
         setIsSegment(false);
-        };
+        images.current.forEach((image) => {
+            if (image.embed) {
+                image.embed.dispose();
+            }
+        });
+        images.current = [];
+      }
     }, []);
 
     //fix for webgpu not rendering when tab is not active
@@ -113,11 +120,45 @@ export default function Canvas() {
 
     useEffect(() => {
         if (deleteSelection) {
-            canvasIn?.current?.remove(...canvasIn?.current?.getActiveObjects());
+            const activeObjects = canvasIn?.current?.getActiveObjects() as fabric.Object[];
+            canvasIn?.current?.remove(...activeObjects);
             canvasIn?.current?.discardActiveObject();
+            activeObjects?.forEach((object) => {
+                deleteFromImagesRef(object);
+            });
         }
         setDeleteSelection(false);
     }, [deleteSelection]);
+
+    useEffect(() => {
+        const activeObject = canvasIn?.current?.getActiveObject() as fabric.Group;
+        if (!ungroup || activeObject == null || activeObject.type !== 'group') {
+            setUngroup(false);
+            return;
+        }
+        deleteFromImagesRef(activeObject);
+        activeObject.toActiveSelection();
+        setMenuProps(menuProps);
+        setUngroup(false);
+    },[ungroup]);
+    
+    function deleteFromImagesRef(object: fabric.Object) {
+        const imageObject = images.current.find((image) => image.fabricImage === object);
+        if (imageObject && imageObject.embed) {
+            imageObject.embed.dispose();
+            images.current = images.current.filter((image) => image.fabricImage !== object);
+        }
+    }
+
+    useEffect(() => {
+        const activeObject = canvasIn?.current?.getActiveObject() as fabric.ActiveSelection;
+        if (!group || activeObject == null || activeObject.type !== 'activeSelection') {
+            setGroup(false);
+            return;
+        }
+        activeObject.toGroup();
+        setGroup(false);
+    },[group]);
 
     function hideMenu() {
         setMenuProps({ top: null, left: null });
@@ -143,12 +184,29 @@ export default function Canvas() {
     }
 
     function segment(opt: fabric.IEvent) {
-        const currentImage = images.current.find((image) => image.fabricImage === opt.target);
+        let currentImage;
+        const target = opt.target as fabric.Object;
+
+        if (target == null || !isSegmentRef.current) {
+            return;
+        }
+
+        if (target.type === 'activeSelection') {
+            const newImage = new fabric.Image(target.toCanvasElement()).set({top: target.top, left: target.left});
+            currentImage = { fabricImage: newImage, embed: null, points: null };
+        } else if (target.type === 'group' || target.type === 'image') {
+            currentImage = images.current.find((image) => image.fabricImage === target);
+            if (currentImage == null) {
+                currentImage = { fabricImage: target as fabric.Object, embed: null, points: null };
+                images.current.push(currentImage);
+            }
+        }
+
         if (isSegmentRef.current && currentImage) {
             setIsSegment(false);
             console.log('segmenting');
             //scale the point to the image's local coords then to 1024x1024
-            const mCanvas = currentImage.fabricImage.canvas?.viewportTransform as number[];
+            const mCanvas = canvasIn?.current?.viewportTransform as number[];
             const mImage = currentImage.fabricImage.calcTransformMatrix();
             const mTotal = fabric.util.multiplyTransformMatrices(mCanvas, mImage);
             const pointer = opt.pointer as fabric.Point;
@@ -222,13 +280,15 @@ export default function Canvas() {
         points.dispose();
         current.points = null;
 
-        images.current.push({ fabricImage: resImage, embed: null, points: null });
         canvasIn?.current?.add(resImage);
         canvasIn?.current?.setActiveObject(resImage);
 
         originalImageTensor.dispose();
         maskTensor.dispose();
         resultTensor.dispose();
+        if (current.fabricImage.type === 'activeSelection') {
+            current.embed.dispose();
+        }
     }
 
     async function handleOnDrop(this: CustomCanvas, opt: fabric.IEvent) {
@@ -242,10 +302,8 @@ export default function Canvas() {
                 const imgInstance = new fabric.Image(image, {
                     left: e.x,
                     top: e.y,
-                
                 });
                 canvasIn?.current?.add(imgInstance);
-                images.current.push({ fabricImage: imgInstance, embed: null, points: null });
             }
 
             const target = eventReader.target as FileReader;
@@ -265,7 +323,7 @@ export default function Canvas() {
                 <canvas id="canvas" ref={canvasRef} tabIndex={0}/> 
             </div>
             <div> 
-                <Menu top={menuProps.top} left={menuProps.left} isSegment={isSegment} setIsSegment={setIsSegment} setDeleteSelection={setDeleteSelection}/>
+                <Menu top={menuProps.top} left={menuProps.left} isSegment={isSegment} setIsSegment={setIsSegment} setDeleteSelection={setDeleteSelection} setGroup={setGroup} setUngroup={setUngroup} />
             </div>
         </div>
     );

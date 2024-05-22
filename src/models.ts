@@ -3,7 +3,7 @@ import * as ort from 'onnxruntime-web/webgpu';
 
 //culprit, i wasnt scaling the image to 1024x1024 properly, ort.Tensor resize was just adding border 
 async function encode(image: ImageObject, encoderSession: React.MutableRefObject<ort.InferenceSession | null>): Promise<ort.Tensor> {
-    const imageTensor = tf.image.resizeBilinear(tf.browser.fromPixels(image.fabricImage.getElement()), [1024, 1024]).concat(tf.ones([1024, 1024, 1], 'float32').mul(255), 2);
+    const imageTensor = tf.image.resizeBilinear(tf.browser.fromPixels(image.fabricImage.toCanvasElement()), [1024, 1024]).concat(tf.ones([1024, 1024, 1], 'float32').mul(255), 2);
     const imageData = new ImageData(new Uint8ClampedArray(await imageTensor.data()), 1024, 1024);
     imageTensor.dispose();
     const imageDataTensor = await ort.Tensor.fromImage(imageData);
