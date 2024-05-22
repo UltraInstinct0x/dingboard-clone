@@ -16,19 +16,22 @@ function Button({ Icon, isActive, onClick}: ButtonProps) {
     )
 }
 
-export default function Menu({top, left, isSegment,  setIsSegment}) {
+export default function Menu({top, left, isSegment,  setIsSegment, setDeleteSelection}) {
     if (top == null || left == null) {
         return null;
     }
-    function onClick() {
+    function onClickSegment() {
         setIsSegment((prev) => !prev);
+    }
+    function onClickDelete() {
+        setDeleteSelection(true);
     }
 
     return (
         <>
             <div className="absolute flex" style={{top: top, left: left}}>
-                <Button Icon={SlPuzzle} isActive={isSegment===true} onClick={onClick} />
-                <Button Icon={SlTrash} />
+                <Button Icon={SlPuzzle} isActive={isSegment===true} onClick={onClickSegment} />
+                <Button Icon={SlTrash}  onClick={onClickDelete}/>
                 <Button Icon={BsEraser} />
             </div>
         </>

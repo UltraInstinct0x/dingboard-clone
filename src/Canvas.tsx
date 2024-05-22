@@ -30,6 +30,7 @@ export default function Canvas() {
     const decoderSession = useRef<ort.InferenceSession | null>(null);
     const [menuProps, setMenuProps] = useState<{ top: number | null, left: number | null }>({ top: null, left: null});
     const [isSegment, setIsSegment] = useState(false);
+    const [deleteSelection, setDeleteSelection] = useState(false);
     const isSegmentRef = useRef(isSegment);
 
     useEffect(() => {
@@ -71,6 +72,9 @@ export default function Canvas() {
         canvas.off('mouse:move', handleMouseMove);
         canvas.off('mouse:up', handleMouseUp);
         canvas.off('mouse:wheel', handleMouseWheel);
+
+        setMenuProps({ top: null, left: null });
+        setIsSegment(false);
         };
     }, []);
 
@@ -106,6 +110,14 @@ export default function Canvas() {
             }
         };
     }, []);
+
+    useEffect(() => {
+        if (deleteSelection) {
+            canvasIn?.current?.remove(...canvasIn?.current?.getActiveObjects());
+            canvasIn?.current?.discardActiveObject();
+        }
+        setDeleteSelection(false);
+    }, [deleteSelection]);
 
     function hideMenu() {
         setMenuProps({ top: null, left: null });
@@ -253,7 +265,7 @@ export default function Canvas() {
                 <canvas id="canvas" ref={canvasRef} tabIndex={0}/> 
             </div>
             <div> 
-                <Menu top={menuProps.top} left={menuProps.left} isSegment={isSegment} setIsSegment={setIsSegment}/>
+                <Menu top={menuProps.top} left={menuProps.left} isSegment={isSegment} setIsSegment={setIsSegment} setDeleteSelection={setDeleteSelection}/>
             </div>
         </div>
     );
