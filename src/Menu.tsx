@@ -1,6 +1,6 @@
 import { SlPuzzle, SlTrash } from "react-icons/sl";
-import { BsEraser } from "react-icons/bs";
 import { FaRegObjectGroup, FaRegObjectUngroup } from "react-icons/fa";
+import { MenuProps } from "./interfaces";
 
 interface ButtonProps {
     Icon: React.ComponentType
@@ -17,7 +17,7 @@ function Button({ Icon, isActive = false, onClick}: ButtonProps) {
     )
 }
 
-export default function Menu({top, left, isSegment,  setIsSegment, setDeleteSelection, setGroup, setUngroup}) {
+export default function Menu({ top, left, setDeleteSelection, setGroup, setUngroup, isSegment, setIsSegment }: MenuProps) {
     if (top == null || left == null) {
         return null;
     }

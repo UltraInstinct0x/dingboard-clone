@@ -11,5 +11,14 @@ interface CustomCanvas extends fabric.Canvas {
     lastPosY: number;
     isDragging: boolean;
 }
+interface MenuProps {
+    top: number | null;
+    left: number | null;
+    isSegment: boolean;
+    setIsSegment: React.Dispatch<React.SetStateAction<boolean>>;
+    setDeleteSelection: (deleteSelection: boolean) => void;
+    setGroup: (group: boolean) => void;
+    setUngroup: (ungroup: boolean) => void;
+}
 
-export { ImageObject, CustomCanvas };
+export type { ImageObject, CustomCanvas, MenuProps };

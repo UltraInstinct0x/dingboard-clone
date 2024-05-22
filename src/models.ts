@@ -1,5 +1,6 @@
 import * as tf from '@tensorflow/tfjs';
 import * as ort from 'onnxruntime-web/webgpu';
+import { ImageObject } from './interfaces';
 
 //culprit, i wasnt scaling the image to 1024x1024 properly, ort.Tensor resize was just adding border 
 async function encode(image: ImageObject, encoderSession: React.MutableRefObject<ort.InferenceSession | null>): Promise<ort.Tensor> {

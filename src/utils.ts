@@ -1,4 +1,5 @@
 import * as tf from '@tensorflow/tfjs';
+import { CustomCanvas } from './interfaces';
 
 function handleMouseDown(this: CustomCanvas, opt: fabric.IEvent) {
   const evt = opt.e as MouseEvent;
