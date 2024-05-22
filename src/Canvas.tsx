@@ -20,7 +20,7 @@ const useFabric = (canvas: React.MutableRefObject<fabric.Canvas | null>) => {
     }, []);
     return fabricRef;
 }
-ort.env.wasm.wasmPaths = '/wasm-files/'
+ort.env.wasm.wasmPaths = import.meta.env.BASE_URL + 'wasm-files/';
 
 export default function Canvas() {
     const canvasIn = useRef<fabric.Canvas | null>(null);
@@ -101,8 +101,8 @@ export default function Canvas() {
     useEffect(() => {
         async function loadModels() {
             try {
-                encoderSession.current = await ort.InferenceSession.create('/models/mobile_sam_encoder_no_preprocess.onnx', { executionProviders: ['webgpu'] });
-                decoderSession.current = await ort.InferenceSession.create('/models/mobilesam.decoder.onnx', { executionProviders: ['webgpu'] });
+                encoderSession.current = await ort.InferenceSession.create(import.meta.env.BASE_URL + 'models/mobile_sam_encoder_no_preprocess.onnx', { executionProviders: ['webgpu'] });
+                decoderSession.current = await ort.InferenceSession.create(import.meta.env.BASE_URL +'models/mobilesam.decoder.onnx', { executionProviders: ['webgpu'] });
             } catch (error) {
                 console.error('Failed to load models:', error);
             }
