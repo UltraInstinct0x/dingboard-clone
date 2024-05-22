@@ -42,6 +42,8 @@ export default function Canvas() {
         const canvas = canvasIn.current as CustomCanvas;
         canvas.setDimensions({ width: window.innerWidth, height: window.innerHeight });
 
+
+        fabric.Object.prototype.on('moving', updateMenu);
         canvas.on('selection:created', updateMenu);
         canvas.on('selection:updated', updateMenu);
         canvas.on('selection:cleared', hideMenu);
@@ -59,6 +61,7 @@ export default function Canvas() {
         console.log('canvas created');
       return () => {
         fabric.Object.prototype.off('mousedown', segment);
+        canvas.off('moving', updateMenu);
         canvas.off('selection:created', updateMenu);
         canvas.off('selection:updated', updateMenu);
         canvas.off('selection:cleared', hideMenu);
@@ -110,25 +113,24 @@ export default function Canvas() {
     }
 
     function updateMenu(opt: fabric.IEvent) {
-        const selected = opt.selected![0];
-
         function getGlobalCoords(source: fabric.Object): fabric.Point {
             const mCanvas = source.canvas?.viewportTransform as number[];
             const point = new fabric.Point(source.left as number, source.top as number);
             return fabric.util.transformPoint(point, mCanvas);
         }
+        //finding the target image
         let point;
-
-        if (selected?.group) {
-            point = getGlobalCoords(selected.group);
-        } else {
-            point = getGlobalCoords(selected);
+        if (opt.transform) { //moving
+            point = getGlobalCoords(opt.transform.target);
+        } else if (opt.selected![0].group) { // selecting a group
+            point = getGlobalCoords(opt.selected![0].group);
+        } else { //selecting an image
+            point = getGlobalCoords(opt.selected![0]);
         }
         setMenuProps({ top: point.y as number - 30, left: point.x as number });
     }
 
     function segment(opt: fabric.IEvent) {
-        const e = opt.e as MouseEvent;
         const currentImage = images.current.find((image) => image.fabricImage === opt.target);
         if (isSegmentRef.current && currentImage) {
             setIsSegment(false);
