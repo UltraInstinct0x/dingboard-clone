@@ -5,6 +5,7 @@ import { viteStaticCopy } from 'vite-plugin-static-copy';
 // https://vitejs.dev/config/
 export default defineConfig({
   base: '/dingboard-clone/',
+
   plugins: [
       react(),
       viteStaticCopy({
@@ -16,4 +17,10 @@ export default defineConfig({
           ]
         }),
     ],
+    server: {
+        headers: {
+            'Cross-Origin-Opener-Policy': 'same-origin',
+            'Cross-Origin-Embedder-Policy': 'require-corp',
+        }
+    },
 })
