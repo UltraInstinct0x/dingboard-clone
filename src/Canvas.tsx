@@ -10,9 +10,21 @@ import { handleMouseDown, handleMouseMove, handleMouseUp, handleMouseWheel, find
 const useFabric = (canvas: React.MutableRefObject<fabric.Canvas | null>) => {
     const fabricRef = useCallback((element: HTMLCanvasElement | null) => {
         if (!element) {
-            return canvas.current?.dispose();
+            if (canvas.current) {
+                canvas.current.dispose();
+                canvas.current = null;
+            }
+            return;
         }
+        console.log('creating canvas');
         canvas.current = new fabric.Canvas(element, {backgroundColor: 'Gainsboro', preserveObjectStacking: true});
+        if (localStorage.getItem('canvas')) {
+            console.log(localStorage.getItem('canvas'));
+            canvas.current?.loadFromJSON(JSON.parse(localStorage.getItem('canvas') as string), () => {
+                canvas.current?.renderAll();
+                console.log('loaded canvas from local storage');
+            });
+        }
         fabric.Object.prototype.transparentCorners = false;
         fabric.Object.prototype.cornerColor = 'white';
         fabric.Object.prototype.cornerStrokeColor = 'black';
@@ -85,6 +97,15 @@ export default function Canvas() {
 
       }
     }, []);
+    useEffect(() => {
+        function unload() {
+            localStorage.setItem('canvas', JSON.stringify(canvasIn.current?.toJSON()));
+        }
+        window.addEventListener('unload', unload);
+        return () => {
+            window.removeEventListener('unload', unload);
+        }
+    },[]);
 
     //fix for webgpu not rendering when tab is not active
     useEffect(() => {
@@ -286,14 +307,18 @@ export default function Canvas() {
         const left = originalImage.left as number;
         const top = originalImage.top as number;
         
-        // @ts-ignore
-        const resImage = new fabric.Image(await createImageBitmap(resultImageData), {
+        const tempCanvas = document.createElement('canvas');
+        const tempCtx = tempCanvas.getContext('bitmaprenderer') as ImageBitmapRenderingContext;
+        tempCtx.transferFromImageBitmap(await createImageBitmap(resultImageData));
+        const resImage = new fabric.Image(tempCanvas, {
             left: left + boundingBox.minX,
             top: top + boundingBox.minY,
             cropX: boundingBox.minX,
             cropY: boundingBox.minY,
             width: boundingBox.maxX - boundingBox.minX,
             height: boundingBox.maxY - boundingBox.minY,
+            // @ts-ignore
+            src: tempCanvas.toDataURL(), //hack to make the image appear on load from local storage
         });
         
         const mImage = originalImage.calcTransformMatrix();
@@ -306,6 +331,7 @@ export default function Canvas() {
 
         canvasIn?.current?.add(resImage);
         canvasIn?.current?.setActiveObject(resImage);
+        console.log(canvasIn.current);
 
         if (current.fabricImage.type === 'activeSelection') {
             current.embed.dispose();
