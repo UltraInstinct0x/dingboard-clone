@@ -31,21 +31,21 @@ async function encode(image: ImageObject, encoderSession: React.MutableRefObject
 }
 
 async function decode(image: ImageObject, decoderSession: React.MutableRefObject<ort.InferenceSession | null>): Promise<ort.InferenceSession.OnnxValueMapType> {
-    const point_coords_ortTensor = tf.tidy(() => {
+    const point_coords = tf.tidy(() => {
         const input_points = image.points as tf.Tensor2D;
         const additional_point = tf.tensor([[0.0, 0.0]], [1, 2], 'float32');
         const point_coords = tf.concat([input_points, additional_point]).expandDims(0);
-        const data = new Float32Array(point_coords.dataSync());
-        return new ort.Tensor('float32', data, point_coords.shape);
+        return point_coords;
     });
+    const point_coords_ortTensor = new ort.Tensor('float32', new Float32Array(await point_coords.data()), point_coords.shape);
 
-    const point_labels_ortTensor = tf.tidy(() => {
+    const point_labels = tf.tidy(() => {
         const input_points = image.points as tf.Tensor2D;
         const point_labels_points = tf.ones([input_points.shape[0]], 'float32');
         const point_labels = tf.concat([point_labels_points, tf.tensor([0], undefined, 'float32')]).expandDims(0);
-        const data = new Float32Array(point_labels.dataSync());
-        return new ort.Tensor('float32', data, point_labels.shape);
+        return point_labels;
     });
+    const point_labels_ortTensor = new ort.Tensor('float32', new Float32Array(await point_labels.data()), point_labels.shape);
 
     const mask_input_ortTensor = new ort.Tensor('float32', new Float32Array((256 * 256 * 1)), [1, 1, 256, 256]);
     const has_mask_input_ortTensor = new ort.Tensor('float32', new Float32Array([0]), [1]);
@@ -72,7 +72,9 @@ async function decode(image: ImageObject, decoderSession: React.MutableRefObject
 
     const output = await session.run(decoder_inputs) as ort.InferenceSession.OnnxValueMapType;
 
+    point_coords.dispose();
     point_coords_ortTensor.dispose();
+    point_labels.dispose();
     point_labels_ortTensor.dispose();
     mask_input_ortTensor.dispose();
     has_mask_input_ortTensor.dispose();

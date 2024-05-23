@@ -104,15 +104,23 @@ export default function Canvas() {
                 encoderSession.current = await ort.InferenceSession.create(import.meta.env.BASE_URL + 'models/mobile_sam_encoder_no_preprocess.onnx', { executionProviders: ['webgpu'] });
                 decoderSession.current = await ort.InferenceSession.create(import.meta.env.BASE_URL +'models/mobilesam.decoder.onnx', { executionProviders: ['webgpu'] });
             } catch (error) {
-                console.error('Failed to load models:', error);
+                try {
+                    encoderSession.current = await ort.InferenceSession.create(import.meta.env.BASE_URL + 'models/mobile_sam_encoder_no_preprocess.onnx', { executionProviders: ['cpu'] });
+                    decoderSession.current = await ort.InferenceSession.create(import.meta.env.BASE_URL +'models/mobilesam.decoder.onnx', { executionProviders: ['cpu'] });
+                }
+                catch (error) {
+                    console.error('Failed to load models:', error);
+                }
             }
         }
         loadModels();
         return () => {
             if (encoderSession.current) {
+                console.log('releasing encoder');
                 encoderSession.current.release();
             }
             if (decoderSession.current) {
+                console.log('releasing decoder');
                 decoderSession.current.release();
             }
         };
@@ -254,7 +262,7 @@ export default function Canvas() {
         // Apply mask to image, TODO: toCanvasElement returns 0,0,0,255 when transparent, turning it black
         const originalImageCanvas = originalImage.toCanvasElement({ withoutTransform: true });
         
-        const [resultImageData, resultTensor] = await tf.tidy(() => {
+        const resultTensor = await tf.tidy(() => {
             const originalImageTensor = tf.image.resizeBilinear(tf.browser.fromPixels(originalImageCanvas), [1024, 1024])
                 .reshape([1024 * 1024, 3])
                 .concat(tf.ones([1024 * 1024, 1], 'float32').mul(255), 1);
@@ -268,14 +276,16 @@ export default function Canvas() {
             let resultTensor = maskTensor.mul(originalImageTensor);
             resultTensor = tf.image.resizeBilinear(resultTensor.reshape([1024, 1024, 4]) as tf.Tensor3D, [originalHeight, originalWidth]);
             
-            return [new ImageData(new Uint8ClampedArray(resultTensor.dataSync()), originalWidth, originalHeight), resultTensor];
+            return resultTensor;
         });
 
         // Transformations to match the mask on the image on the canvas 
+        const resultImageData = new ImageData(new Uint8ClampedArray(await resultTensor.data()), originalWidth, originalHeight);
         const boundingBox = findBoundingBox(resultTensor as tf.Tensor3D);
         const left = originalImage.left as number;
         const top = originalImage.top as number;
         
+        // @ts-ignore
         const resImage = new fabric.Image(await createImageBitmap(resultImageData), {
             left: left + boundingBox.minX,
             top: top + boundingBox.minY,
