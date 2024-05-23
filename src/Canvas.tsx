@@ -19,7 +19,6 @@ const useFabric = (canvas: React.MutableRefObject<fabric.Canvas | null>) => {
         console.log('creating canvas');
         canvas.current = new fabric.Canvas(element, {backgroundColor: 'Gainsboro', preserveObjectStacking: true});
         if (localStorage.getItem('canvas')) {
-            console.log(localStorage.getItem('canvas'));
             canvas.current?.loadFromJSON(JSON.parse(localStorage.getItem('canvas') as string), () => {
                 canvas.current?.renderAll();
                 console.log('loaded canvas from local storage');
@@ -125,10 +124,13 @@ export default function Canvas() {
             try {
                 encoderSession.current = await ort.InferenceSession.create(import.meta.env.BASE_URL + 'models/mobile_sam_encoder_no_preprocess.onnx', { executionProviders: ['webgpu'] });
                 decoderSession.current = await ort.InferenceSession.create(import.meta.env.BASE_URL +'models/mobilesam.decoder.onnx', { executionProviders: ['webgpu'] });
+                console.log('loaded models with webgpu');
             } catch (error) {
                 try {
+                    console.log('failed to load webgpu, trying cpu');
                     encoderSession.current = await ort.InferenceSession.create(import.meta.env.BASE_URL + 'models/mobile_sam_encoder_no_preprocess.onnx', { executionProviders: ['cpu'] });
-                    decoderSession.current = await ort.InferenceSession.create(import.meta.env.BASE_URL +'models/mobilesam.decoder.onnx', { executionProviders: ['cpu'] });
+                    decoderSession.current = await ort.InferenceSession.create(import.meta.env.BASE_URL + 'models/mobilesam.decoder.onnx', { executionProviders: ['cpu'] });
+                    console.log('loaded models with cpu');
                 }
                 catch (error) {
                     console.error('Failed to load models:', error);
@@ -331,7 +333,6 @@ export default function Canvas() {
 
         canvasIn?.current?.add(resImage);
         canvasIn?.current?.setActiveObject(resImage);
-        console.log(canvasIn.current);
 
         if (current.fabricImage.type === 'activeSelection') {
             current.embed.dispose();
