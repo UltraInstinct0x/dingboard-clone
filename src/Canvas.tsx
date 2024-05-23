@@ -230,7 +230,10 @@ export default function Canvas() {
             if (currentImage.points == null) {
                 currentImage.points = tf.tensor([[newX, newY]], [1, 2], 'float32') as tf.Tensor2D;
             } else {
+                const oldPoints = currentImage.points;
                 currentImage.points = tf.concat([currentImage.points, tf.tensor([[newX, newY]], [1, 2], 'float32')], 0) as tf.Tensor2D;
+                oldPoints.dispose();
+
             }
             encodeDecode(currentImage);
         }
@@ -244,26 +247,35 @@ export default function Canvas() {
         if (current.embed == null) {
             current.embed = await encode(current, encoderSession);
         }
-        //get mask
+
+        // Get mask
         const output = await decode(current, decoderSession);
 
-        //apply mask to image, TODO: toCanvasElement returns 0,0,0,255 when transparent, turning it black
-        const originalImageCanvas = originalImage.toCanvasElement({withoutTransform: true});
-        const originalImageTensor = tf.image.resizeBilinear(tf.browser.fromPixels(originalImageCanvas), [1024, 1024]).reshape([1024*1024, 3]).concat(tf.ones([1024*1024, 1], 'float32').mul(255), 1);
-        const maskImageData = output['masks'].toImageData();
+        // Apply mask to image, TODO: toCanvasElement returns 0,0,0,255 when transparent, turning it black
+        const originalImageCanvas = originalImage.toCanvasElement({ withoutTransform: true });
+        
+        const [resultImageData, resultTensor] = await tf.tidy(() => {
+            const originalImageTensor = tf.image.resizeBilinear(tf.browser.fromPixels(originalImageCanvas), [1024, 1024])
+                .reshape([1024 * 1024, 3])
+                .concat(tf.ones([1024 * 1024, 1], 'float32').mul(255), 1);
+            
+            const maskImageData = output['masks'].toImageData();
+            
+            const maskTensor = tf.tensor(maskImageData.data, [maskImageData.data.length / 4, 4], 'float32')
+                .slice([0, 0], [-1, 3])
+                .notEqual(0).any(1).cast('int32').reshape([maskImageData.data.length / 4, 1]).tile([1, 4]);
+            
+            let resultTensor = maskTensor.mul(originalImageTensor);
+            resultTensor = tf.image.resizeBilinear(resultTensor.reshape([1024, 1024, 4]) as tf.Tensor3D, [originalHeight, originalWidth]);
+            
+            return [new ImageData(new Uint8ClampedArray(resultTensor.dataSync()), originalWidth, originalHeight), resultTensor];
+        });
 
-        let maskTensor = tf.tensor(maskImageData.data, [maskImageData.data.length/4, 4], 'float32');
-        maskTensor = maskTensor.slice([0,0], [-1, 3]);
-        maskTensor = maskTensor.notEqual(0).any(1).cast('int32').reshape([maskImageData.data.length/4, 1]).tile([1,4]);
-        let resultTensor = maskTensor.mul(originalImageTensor); 
-        resultTensor = tf.image.resizeBilinear(resultTensor.reshape([1024, 1024, 4]) as tf.Tensor3D, [originalHeight, originalWidth]);
-        const resultImageData = new ImageData(new Uint8ClampedArray(await resultTensor.data()), originalWidth, originalHeight);
-
-        //transformations to match the mask on the image on the canvas 
+        // Transformations to match the mask on the image on the canvas 
         const boundingBox = findBoundingBox(resultTensor as tf.Tensor3D);
         const left = originalImage.left as number;
         const top = originalImage.top as number;
-        // @ts-ignore
+        
         const resImage = new fabric.Image(await createImageBitmap(resultImageData), {
             left: left + boundingBox.minX,
             top: top + boundingBox.minY,
@@ -272,10 +284,11 @@ export default function Canvas() {
             width: boundingBox.maxX - boundingBox.minX,
             height: boundingBox.maxY - boundingBox.minY,
         });
+        
         const mImage = originalImage.calcTransformMatrix();
         const opt = fabric.util.qrDecompose(mImage);
         resImage.set(opt);
-       
+
         const points = current.points as tf.Tensor2D;
         points.dispose();
         current.points = null;
@@ -283,14 +296,15 @@ export default function Canvas() {
         canvasIn?.current?.add(resImage);
         canvasIn?.current?.setActiveObject(resImage);
 
-        originalImageTensor.dispose();
-        maskTensor.dispose();
-        resultTensor.dispose();
         if (current.fabricImage.type === 'activeSelection') {
             current.embed.dispose();
         }
-    }
 
+        resultTensor.dispose();
+        output['masks'].dispose();
+        output['iou_predictions'].dispose();
+        output['low_res_masks'].dispose();
+    }
     async function handleOnDrop(this: CustomCanvas, opt: fabric.IEvent) {
         const e = opt.e as DragEvent;
         e.preventDefault();
