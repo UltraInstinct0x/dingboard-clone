@@ -63,7 +63,7 @@ export default function Canvas() {
         console.log('canvas created');
       return () => {
         fabric.Object.prototype.off('mousedown', segment);
-        canvas.off('moving', updateMenu);
+        fabric.Object.prototype.off('moving', updateMenu);
         canvas.off('selection:created', updateMenu);
         canvas.off('selection:updated', updateMenu);
         canvas.off('selection:cleared', hideMenu);
@@ -82,6 +82,7 @@ export default function Canvas() {
             }
         });
         images.current = [];
+
       }
     }, []);
 
