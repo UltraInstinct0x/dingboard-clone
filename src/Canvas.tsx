@@ -31,7 +31,15 @@ const useFabric = (canvas: React.MutableRefObject<fabric.Canvas | null>) => {
     }, []);
     return fabricRef;
 }
+
 ort.env.wasm.wasmPaths = import.meta.env.BASE_URL + 'wasm-files/';
+if (self.crossOriginIsolated) {
+    ort.env.wasm.numThreads = Math.ceil(navigator.hardwareConcurrency / 2);
+} else {
+    ort.env.wasm.numThreads = 1;
+}
+
+console.log('numThreads:', ort.env.wasm.numThreads);
 
 export default function Canvas() {
     const canvasIn = useRef<fabric.Canvas | null>(null);
