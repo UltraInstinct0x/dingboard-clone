@@ -16,6 +16,8 @@ only tested on chrome
 - undo/redo
 - some other shit
 
+## NOTES
+- enable cross-origin isolation for onnx multithreading using vite headers and by using code from [this guy](https://github.com/josephrocca/clip-image-sorter) to enable it for github pages.
 
 sorry its my first time with react, typescript, and frontend things
 
