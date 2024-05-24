@@ -6,23 +6,29 @@ import Menu from './Menu';
 import { encode, decode } from './models';
 import { ImageObject, CustomCanvas } from './interfaces';
 import { handleMouseDown, handleMouseMove, handleMouseUp, handleMouseWheel, findBoundingBox } from './utils';
+import UndoButton from './UndoButton';
 
-const useFabric = (canvas: React.MutableRefObject<fabric.Canvas | null>) => {
+const useFabric = (canvas: React.MutableRefObject<fabric.Canvas | null>, stack: React.MutableRefObject<String[]>) => {
     const fabricRef = useCallback((element: HTMLCanvasElement | null) => {
         if (!element) {
             if (canvas.current) {
                 canvas.current.dispose();
                 canvas.current = null;
             }
+            if (stack.current) {
+                stack.current = [];
+            }
             return;
         }
-        console.log('creating canvas');
         canvas.current = new fabric.Canvas(element, {backgroundColor: 'Gainsboro', preserveObjectStacking: true});
         if (localStorage.getItem('canvas')) {
             canvas.current?.loadFromJSON(JSON.parse(localStorage.getItem('canvas') as string), () => {
                 canvas.current?.renderAll();
                 console.log('loaded canvas from local storage');
             });
+        }
+        if (localStorage.getItem('stack')) {
+            stack.current = JSON.parse(localStorage.getItem('stack') as string);
         }
         fabric.Object.prototype.transparentCorners = false;
         fabric.Object.prototype.cornerColor = 'white';
@@ -43,7 +49,8 @@ console.log('numThreads:', ort.env.wasm.numThreads);
 
 export default function Canvas() {
     const canvasIn = useRef<fabric.Canvas | null>(null);
-    const canvasRef = useFabric(canvasIn);
+    const stack = useRef<String[]>([]);
+    const canvasRef = useFabric(canvasIn, stack);
     const images = useRef<ImageObject[]>([]);
     const encoderSession = useRef<ort.InferenceSession | null>(null);
     const decoderSession = useRef<ort.InferenceSession | null>(null);
@@ -53,6 +60,7 @@ export default function Canvas() {
     const isSegmentRef = useRef(isSegment);
     const [group, setGroup] = useState(false);
     const [ungroup, setUngroup] = useState(false);
+    const [undo, setUndo] = useState(false);
 
     useEffect(() => {
         isSegmentRef.current = isSegment;
@@ -79,7 +87,11 @@ export default function Canvas() {
         canvas.on('mouse:up', handleMouseUp);
         canvas.on('mouse:wheel', handleMouseWheel);
 
-        console.log('canvas created');
+
+        //undo 
+        canvas.on('object:added', saveState);
+        canvas.on('object:modified', saveState);
+
       return () => {
         fabric.Object.prototype.off('mousedown', segment);
         fabric.Object.prototype.off('moving', updateMenu);
@@ -92,6 +104,8 @@ export default function Canvas() {
         canvas.off('mouse:move', handleMouseMove);
         canvas.off('mouse:up', handleMouseUp);
         canvas.off('mouse:wheel', handleMouseWheel);
+        canvas.off('object:added', saveState);
+        canvas.off('object:modified', saveState);
 
         setMenuProps({ top: null, left: null });
         setIsSegment(false);
@@ -107,6 +121,7 @@ export default function Canvas() {
     useEffect(() => {
         function unload() {
             localStorage.setItem('canvas', JSON.stringify(canvasIn.current?.toJSON()));
+            localStorage.setItem('stack', JSON.stringify(stack.current));
         }
         window.addEventListener('unload', unload);
         return () => {
@@ -129,6 +144,7 @@ export default function Canvas() {
 
     async function loadModels() {
         try {
+            console.log('trying to load models with webgpu');
             encoderSession.current = await ort.InferenceSession.create(import.meta.env.BASE_URL + 'models/mobile_sam_encoder_no_preprocess.onnx', { executionProviders: ['webgpu'] });
             decoderSession.current = await ort.InferenceSession.create(import.meta.env.BASE_URL +'models/mobilesam.decoder.onnx', { executionProviders: ['webgpu'] });
             console.log('loaded models with webgpu');
@@ -221,6 +237,28 @@ export default function Canvas() {
             point = getGlobalCoords(opt.selected![0]);
         }
         setMenuProps({ top: point.y as number - 30, left: point.x as number });
+    }
+
+    function saveState() {
+        const canvasState = JSON.stringify(canvasIn.current?.toJSON());
+        stack.current.push(canvasState);
+    }
+
+    useEffect(() => {
+        if (undo) {
+            undoCanvas();
+            setUndo(false);
+        }
+    }, [undo]);
+
+    function undoCanvas() {
+        if (stack.current.length > 1) {
+            stack.current.pop();
+            const canvasState = stack.current.pop();
+            canvasIn.current?.loadFromJSON(canvasState, () => {
+                canvasIn.current?.renderAll();
+            });
+        }
     }
 
     function segment(opt: fabric.IEvent) {
@@ -387,6 +425,7 @@ export default function Canvas() {
             </div>
             <div> 
                 <Menu top={menuProps.top} left={menuProps.left} isSegment={isSegment} setIsSegment={setIsSegment} setDeleteSelection={setDeleteSelection} setGroup={setGroup} setUngroup={setUngroup} />
+                <UndoButton setUndo={setUndo}/>
             </div>
         </div>
     );
