@@ -12,9 +12,11 @@ only tested on chrome
 - background removal
 - copy/paste images to and from canvas
 - caching the model onnx sessions
-- localstorage of canvas state
 - undo/redo
 - some other shit
+
+## DONE 
+- localstorage of canvas state
 
 ## NOTES
 - enable cross-origin isolation for onnx multithreading using vite headers and by using code from [this guy](https://github.com/josephrocca/clip-image-sorter) to enable it for github pages.
