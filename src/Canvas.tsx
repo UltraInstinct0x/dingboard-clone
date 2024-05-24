@@ -127,24 +127,24 @@ export default function Canvas() {
         };
     }, []);
 
-    useEffect(() => {
-        async function loadModels() {
+    async function loadModels() {
+        try {
+            encoderSession.current = await ort.InferenceSession.create(import.meta.env.BASE_URL + 'models/mobile_sam_encoder_no_preprocess.onnx', { executionProviders: ['webgpu'] });
+            decoderSession.current = await ort.InferenceSession.create(import.meta.env.BASE_URL +'models/mobilesam.decoder.onnx', { executionProviders: ['webgpu'] });
+            console.log('loaded models with webgpu');
+        } catch (error) {
             try {
-                encoderSession.current = await ort.InferenceSession.create(import.meta.env.BASE_URL + 'models/mobile_sam_encoder_no_preprocess.onnx', { executionProviders: ['webgpu'] });
-                decoderSession.current = await ort.InferenceSession.create(import.meta.env.BASE_URL +'models/mobilesam.decoder.onnx', { executionProviders: ['webgpu'] });
-                console.log('loaded models with webgpu');
-            } catch (error) {
-                try {
-                    console.log('failed to load webgpu, trying cpu');
-                    encoderSession.current = await ort.InferenceSession.create(import.meta.env.BASE_URL + 'models/mobile_sam_encoder_no_preprocess.onnx', { executionProviders: ['cpu'] });
-                    decoderSession.current = await ort.InferenceSession.create(import.meta.env.BASE_URL + 'models/mobilesam.decoder.onnx', { executionProviders: ['cpu'] });
-                    console.log('loaded models with cpu');
-                }
-                catch (error) {
-                    console.error('Failed to load models:', error);
-                }
+                console.log('failed to load webgpu, trying cpu');
+                encoderSession.current = await ort.InferenceSession.create(import.meta.env.BASE_URL + 'models/mobile_sam_encoder_no_preprocess.onnx', { executionProviders: ['cpu'] });
+                decoderSession.current = await ort.InferenceSession.create(import.meta.env.BASE_URL + 'models/mobilesam.decoder.onnx', { executionProviders: ['cpu'] });
+                console.log('loaded models with cpu');
+            }
+            catch (error) {
+                console.error('Failed to load models:', error);
             }
         }
+    }
+    useEffect(() => {
         loadModels();
         return () => {
             if (encoderSession.current) {
@@ -284,6 +284,9 @@ export default function Canvas() {
         const originalWidth = originalImage.width as number;
         const originalHeight = originalImage.height as number;
 
+        if (encoderSession.current == null || decoderSession.current == null) {
+            await loadModels();
+        }
         if (current.embed == null) {
             current.embed = await encode(current, encoderSession);
         }
