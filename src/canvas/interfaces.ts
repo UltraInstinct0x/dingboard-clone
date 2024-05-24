@@ -14,11 +14,11 @@ interface CustomCanvas extends fabric.Canvas {
 interface MenuProps {
     top: number | null;
     left: number | null;
+    handleDelete: () => void;
+    handleGroup: () => void;
+    handleUngroup: () => void;
     isSegment: boolean;
-    setIsSegment: React.Dispatch<React.SetStateAction<boolean>>;
-    setDeleteSelection: (deleteSelection: boolean) => void;
-    setGroup: (group: boolean) => void;
-    setUngroup: (ungroup: boolean) => void;
+    handleSegment: () => void;
 }
 
 export type { ImageObject, CustomCanvas, MenuProps };

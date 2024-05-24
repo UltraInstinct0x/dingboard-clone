@@ -2,6 +2,28 @@ import * as tf from '@tensorflow/tfjs';
 import * as ort from 'onnxruntime-web/webgpu';
 import { ImageObject } from './interfaces';
 
+async function loadModels(encoderSession: React.MutableRefObject<ort.InferenceSession | null>, decoderSession: React.MutableRefObject<ort.InferenceSession | null>) {
+    if (encoderSession.current != null && decoderSession.current != null) {
+        console.log('models already loaded');
+        return;
+    }
+    try {
+        console.log('trying to load models with webgpu');
+        encoderSession.current = await ort.InferenceSession.create(import.meta.env.BASE_URL + 'models/mobile_sam_encoder_no_preprocess.onnx', { executionProviders: ['webgpu'] });
+        decoderSession.current = await ort.InferenceSession.create(import.meta.env.BASE_URL +'models/mobilesam.decoder.onnx', { executionProviders: ['webgpu'] });
+        console.log('loaded models with webgpu');
+    } catch (error) {
+        try {
+            console.log('failed to load webgpu, trying cpu');
+            encoderSession.current = await ort.InferenceSession.create(import.meta.env.BASE_URL + 'models/mobile_sam_encoder_no_preprocess.onnx', { executionProviders: ['cpu'] });
+            decoderSession.current = await ort.InferenceSession.create(import.meta.env.BASE_URL + 'models/mobilesam.decoder.onnx', { executionProviders: ['cpu'] });
+            console.log('loaded models with cpu');
+        }
+        catch (error) {
+            console.error('Failed to load models:', error);
+        }
+    }
+}
 //culprit, i wasnt scaling the image to 1024x1024 properly, ort.Tensor resize was just adding border 
 async function encode(image: ImageObject, encoderSession: React.MutableRefObject<ort.InferenceSession | null>): Promise<ort.Tensor> {
     const imageTensor = tf.tidy(() => {
@@ -82,4 +104,4 @@ async function decode(image: ImageObject, decoderSession: React.MutableRefObject
 
     return output;
 }
-export { encode, decode };
+export { encode, decode, loadModels};

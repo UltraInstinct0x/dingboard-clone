@@ -3,7 +3,7 @@ import * as tf from '@tensorflow/tfjs';
 import * as ort from 'onnxruntime-web/webgpu';
 import { fabric } from 'fabric';
 import Menu from './Menu';
-import { encode, decode } from './models';
+import { encode, decode, loadModels } from './models';
 import { ImageObject, CustomCanvas } from './interfaces';
 import { handleMouseDown, handleMouseMove, handleMouseUp, handleMouseWheel, findBoundingBox } from './utils';
 import UndoButton from './UndoButton';
@@ -11,13 +11,9 @@ import UndoButton from './UndoButton';
 const useFabric = (canvas: React.MutableRefObject<fabric.Canvas | null>, stack: React.MutableRefObject<String[]>) => {
     const fabricRef = useCallback((element: HTMLCanvasElement | null) => {
         if (!element) {
-            if (canvas.current) {
-                canvas.current.dispose();
-                canvas.current = null;
-            }
-            if (stack.current) {
-                stack.current = [];
-            }
+            canvas.current?.dispose();
+            canvas.current = null;
+            stack.current = [];
             return;
         }
         canvas.current = new fabric.Canvas(element, {backgroundColor: 'Gainsboro', preserveObjectStacking: true});
@@ -44,7 +40,6 @@ if (self.crossOriginIsolated) {
 } else {
     ort.env.wasm.numThreads = 1;
 }
-
 console.log('numThreads:', ort.env.wasm.numThreads);
 
 export default function Canvas() {
@@ -54,17 +49,12 @@ export default function Canvas() {
     const images = useRef<ImageObject[]>([]);
     const encoderSession = useRef<ort.InferenceSession | null>(null);
     const decoderSession = useRef<ort.InferenceSession | null>(null);
-    const [menuProps, setMenuProps] = useState<{ top: number | null, left: number | null }>({ top: null, left: null});
+    const [menuPos, setMenuPos] = useState<{ top: number | null, left: number | null }>({ top: null, left: null});
     const [isSegment, setIsSegment] = useState(false);
-    const [deleteSelection, setDeleteSelection] = useState(false);
     const isSegmentRef = useRef(isSegment);
-    const [group, setGroup] = useState(false);
-    const [ungroup, setUngroup] = useState(false);
-    const [undo, setUndo] = useState(false);
 
-    useEffect(() => {
-        isSegmentRef.current = isSegment;
-    }, [isSegment]);
+    isSegmentRef.current = isSegment;
+
     useEffect(() => {
         //segmentation
         fabric.Object.prototype.on('mousedown', segment);
@@ -87,7 +77,6 @@ export default function Canvas() {
         canvas.on('mouse:up', handleMouseUp);
         canvas.on('mouse:wheel', handleMouseWheel);
 
-
         //undo 
         canvas.on('object:added', saveState);
         canvas.on('object:modified', saveState);
@@ -107,7 +96,7 @@ export default function Canvas() {
         canvas.off('object:added', saveState);
         canvas.off('object:modified', saveState);
 
-        setMenuProps({ top: null, left: null });
+        setMenuPos({ top: null, left: null });
         setIsSegment(false);
         images.current.forEach((image) => {
             if (image.embed) {
@@ -118,6 +107,8 @@ export default function Canvas() {
 
       }
     }, []);
+
+    //save canvas state to local storage
     useEffect(() => {
         function unload() {
             localStorage.setItem('canvas', JSON.stringify(canvasIn.current?.toJSON()));
@@ -129,7 +120,7 @@ export default function Canvas() {
         }
     },[]);
 
-    //fix for webgpu not rendering when tab is not active
+    //fix for canavs not rendering when tab is not active
     useEffect(() => {
         const handleVisibilityChange = () => {
             if (document.visibilityState === 'visible' && canvasIn?.current) {
@@ -142,26 +133,8 @@ export default function Canvas() {
         };
     }, []);
 
-    async function loadModels() {
-        try {
-            console.log('trying to load models with webgpu');
-            encoderSession.current = await ort.InferenceSession.create(import.meta.env.BASE_URL + 'models/mobile_sam_encoder_no_preprocess.onnx', { executionProviders: ['webgpu'] });
-            decoderSession.current = await ort.InferenceSession.create(import.meta.env.BASE_URL +'models/mobilesam.decoder.onnx', { executionProviders: ['webgpu'] });
-            console.log('loaded models with webgpu');
-        } catch (error) {
-            try {
-                console.log('failed to load webgpu, trying cpu');
-                encoderSession.current = await ort.InferenceSession.create(import.meta.env.BASE_URL + 'models/mobile_sam_encoder_no_preprocess.onnx', { executionProviders: ['cpu'] });
-                decoderSession.current = await ort.InferenceSession.create(import.meta.env.BASE_URL + 'models/mobilesam.decoder.onnx', { executionProviders: ['cpu'] });
-                console.log('loaded models with cpu');
-            }
-            catch (error) {
-                console.error('Failed to load models:', error);
-            }
-        }
-    }
     useEffect(() => {
-        loadModels();
+        loadModels(encoderSession, decoderSession);
         return () => {
             if (encoderSession.current) {
                 console.log('releasing encoder');
@@ -171,53 +144,13 @@ export default function Canvas() {
                 console.log('releasing decoder');
                 decoderSession.current.release();
             }
+            encoderSession.current = null;
+            decoderSession.current = null;
         };
     }, []);
 
-    useEffect(() => {
-        if (deleteSelection) {
-            const activeObjects = canvasIn?.current?.getActiveObjects() as fabric.Object[];
-            canvasIn?.current?.remove(...activeObjects);
-            canvasIn?.current?.discardActiveObject();
-            activeObjects?.forEach((object) => {
-                deleteFromImagesRef(object);
-            });
-        }
-        setDeleteSelection(false);
-    }, [deleteSelection]);
-
-    useEffect(() => {
-        const activeObject = canvasIn?.current?.getActiveObject() as fabric.Group;
-        if (!ungroup || activeObject == null || activeObject.type !== 'group') {
-            setUngroup(false);
-            return;
-        }
-        deleteFromImagesRef(activeObject);
-        activeObject.toActiveSelection();
-        setMenuProps(menuProps);
-        setUngroup(false);
-    },[ungroup]);
-    
-    function deleteFromImagesRef(object: fabric.Object) {
-        const imageObject = images.current.find((image) => image.fabricImage === object);
-        if (imageObject && imageObject.embed) {
-            imageObject.embed.dispose();
-            images.current = images.current.filter((image) => image.fabricImage !== object);
-        }
-    }
-
-    useEffect(() => {
-        const activeObject = canvasIn?.current?.getActiveObject() as fabric.ActiveSelection;
-        if (!group || activeObject == null || activeObject.type !== 'activeSelection') {
-            setGroup(false);
-            return;
-        }
-        activeObject.toGroup();
-        setGroup(false);
-    },[group]);
-
     function hideMenu() {
-        setMenuProps({ top: null, left: null });
+        setMenuPos({ top: null, left: null });
         setIsSegment(false);
     }
 
@@ -236,29 +169,12 @@ export default function Canvas() {
         } else { //selecting an image
             point = getGlobalCoords(opt.selected![0]);
         }
-        setMenuProps({ top: point.y as number - 30, left: point.x as number });
+        setMenuPos({ top: point.y as number - 30, left: point.x as number });
     }
 
     function saveState() {
         const canvasState = JSON.stringify(canvasIn.current?.toJSON());
         stack.current.push(canvasState);
-    }
-
-    useEffect(() => {
-        if (undo) {
-            undoCanvas();
-            setUndo(false);
-        }
-    }, [undo]);
-
-    function undoCanvas() {
-        if (stack.current.length > 1) {
-            stack.current.pop();
-            const canvasState = stack.current.pop();
-            canvasIn.current?.loadFromJSON(canvasState, () => {
-                canvasIn.current?.renderAll();
-            });
-        }
     }
 
     function segment(opt: fabric.IEvent) {
@@ -281,7 +197,6 @@ export default function Canvas() {
         }
 
         if (isSegmentRef.current && currentImage) {
-            setIsSegment(false);
             console.log('segmenting');
             //scale the point to the image's local coords then to 1024x1024
             const mCanvas = canvasIn?.current?.viewportTransform as number[];
@@ -314,6 +229,7 @@ export default function Canvas() {
 
             }
             encodeDecode(currentImage);
+            setIsSegment(false);
         }
     }
 
@@ -323,7 +239,7 @@ export default function Canvas() {
         const originalHeight = originalImage.height as number;
 
         if (encoderSession.current == null || decoderSession.current == null) {
-            await loadModels();
+            await loadModels(encoderSession, decoderSession);
         }
         if (current.embed == null) {
             current.embed = await encode(current, encoderSession);
@@ -392,6 +308,7 @@ export default function Canvas() {
         output['iou_predictions'].dispose();
         output['low_res_masks'].dispose();
     }
+
     async function handleOnDrop(this: CustomCanvas, opt: fabric.IEvent) {
         const e = opt.e as DragEvent;
         e.preventDefault();
@@ -418,14 +335,64 @@ export default function Canvas() {
          opt.e.preventDefault();
      }
 
+    function handleDelete() {
+        const activeObjects = canvasIn?.current?.getActiveObjects() as fabric.Object[];
+        canvasIn?.current?.remove(...activeObjects);
+        canvasIn?.current?.discardActiveObject();
+        activeObjects?.forEach((object) => {
+            deleteFromImagesRef(object);
+        });
+    }
+
+    function handleUngroup() {
+        const activeObject = canvasIn?.current?.getActiveObject() as fabric.Group;
+        if (activeObject == null || activeObject.type !== 'group') {
+            return;
+        }
+        deleteFromImagesRef(activeObject);
+        activeObject.toActiveSelection();
+        setMenuPos(menuPos);
+    }
+    
+    function deleteFromImagesRef(object: fabric.Object) {
+        const imageObject = images.current.find((image) => image.fabricImage === object);
+        if (imageObject && imageObject.embed) {
+            imageObject.embed.dispose();
+            images.current = images.current.filter((image) => image.fabricImage !== object);
+        }
+    }
+
+    function handleGroup() {
+        const activeObject = canvasIn?.current?.getActiveObject() as fabric.ActiveSelection;
+        if (activeObject == null || activeObject.type !== 'activeSelection') {
+            return;
+        }
+        activeObject.toGroup();
+        setMenuPos(menuPos);
+    }
+
+    function handleUndo() {
+        if (stack.current.length > 1) {
+            stack.current.pop();
+            const canvasState = stack.current.pop();
+            canvasIn.current?.loadFromJSON(canvasState, () => {
+                canvasIn.current?.renderAll();
+            });
+        }
+    }
+    
+    function handleSegment() {
+        setIsSegment((prev) => !prev);
+    }
+
     return (
         <div>
             <div>
                 <canvas id="canvas" ref={canvasRef} tabIndex={0}/> 
             </div>
             <div> 
-                <Menu top={menuProps.top} left={menuProps.left} isSegment={isSegment} setIsSegment={setIsSegment} setDeleteSelection={setDeleteSelection} setGroup={setGroup} setUngroup={setUngroup} />
-                <UndoButton setUndo={setUndo}/>
+                <Menu top={menuPos.top} left={menuPos.left} isSegment={isSegment} handleSegment={handleSegment} handleDelete={handleDelete} handleGroup={handleGroup} handleUngroup={handleUngroup} />
+                <UndoButton handleUndo={handleUndo}/>
             </div>
         </div>
     );
