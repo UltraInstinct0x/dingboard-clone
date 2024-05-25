@@ -275,6 +275,8 @@ export default function Canvas() {
         const top = originalImage.top as number;
         
         const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = originalWidth;
+        tempCanvas.height = originalHeight;
         const tempCtx = tempCanvas.getContext('bitmaprenderer') as ImageBitmapRenderingContext;
         tempCtx.transferFromImageBitmap(await createImageBitmap(resultImageData));
         const resImage = new fabric.Image(tempCanvas, {
