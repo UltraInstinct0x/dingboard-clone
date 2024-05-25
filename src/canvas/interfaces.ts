@@ -2,7 +2,7 @@ import * as tf from '@tensorflow/tfjs';
 import * as ort from 'onnxruntime-web/webgpu';
 
 interface ImageObject {
-    fabricImage: fabric.Object;
+    fabricImage: fabric.Image | fabric.Group;
     embed: ort.Tensor | null;
     points: tf.Tensor2D | null;
 }
@@ -19,6 +19,7 @@ interface MenuProps {
     handleUngroup: () => void;
     isSegment: boolean;
     handleSegment: () => void;
+    handleRmbg: () => void;
 }
 
 export type { ImageObject, CustomCanvas, MenuProps };

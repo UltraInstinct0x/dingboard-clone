@@ -3,9 +3,9 @@ import * as tf from '@tensorflow/tfjs';
 import * as ort from 'onnxruntime-web/webgpu';
 import { fabric } from 'fabric';
 import Menu from './Menu';
-import { encode, decode, loadModels } from './models';
+import { encode, decode, loadModel, rmbg } from './models';
 import { ImageObject, CustomCanvas } from './interfaces';
-import { handleMouseDown, handleMouseMove, handleMouseUp, handleMouseWheel, findBoundingBox } from './utils';
+import { handleMouseDown, handleMouseMove, handleMouseUp, handleMouseWheel} from './utils';
 import UndoButton from './UndoButton';
 
 const useFabric = (canvas: React.MutableRefObject<fabric.Canvas | null>, stack: React.MutableRefObject<String[]>) => {
@@ -34,6 +34,9 @@ const useFabric = (canvas: React.MutableRefObject<fabric.Canvas | null>, stack: 
     return fabricRef;
 }
 
+const encoderModelPath = 'models/mobile_sam_encoder_no_preprocess.onnx';
+const decoderModelPath = 'models/mobilesam.decoder.onnx';
+const rmbgModelPath = 'models/rmbg.quantized.onnx';
 ort.env.wasm.wasmPaths = import.meta.env.BASE_URL + 'wasm-files/';
 if (self.crossOriginIsolated) {
     ort.env.wasm.numThreads = Math.ceil(navigator.hardwareConcurrency / 2);
@@ -49,9 +52,11 @@ export default function Canvas() {
     const images = useRef<ImageObject[]>([]);
     const encoderSession = useRef<ort.InferenceSession | null>(null);
     const decoderSession = useRef<ort.InferenceSession | null>(null);
+    const rmbgSession = useRef<ort.InferenceSession | null>(null);
     const [menuPos, setMenuPos] = useState<{ top: number | null, left: number | null }>({ top: null, left: null});
     const [isSegment, setIsSegment] = useState(false);
     const isSegmentRef = useRef(isSegment);
+
 
     isSegmentRef.current = isSegment;
 
@@ -123,8 +128,8 @@ export default function Canvas() {
     //fix for canavs not rendering when tab is not active
     useEffect(() => {
         const handleVisibilityChange = () => {
-            if (document.visibilityState === 'visible' && canvasIn?.current) {
-                canvasIn?.current?.requestRenderAll();
+            if (document.visibilityState === 'visible' && canvasIn.current) {
+                canvasIn.current?.requestRenderAll();
             }
         };
         document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -134,7 +139,9 @@ export default function Canvas() {
     }, []);
 
     useEffect(() => {
-        loadModels(encoderSession, decoderSession);
+        loadModel(encoderSession, encoderModelPath);
+        loadModel(decoderSession, decoderModelPath);
+        loadModel(rmbgSession, rmbgModelPath);
         return () => {
             if (encoderSession.current) {
                 console.log('releasing encoder');
@@ -144,8 +151,13 @@ export default function Canvas() {
                 console.log('releasing decoder');
                 decoderSession.current.release();
             }
+            if (rmbgSession.current) {
+                console.log('releasing rmbgSession');
+                rmbgSession.current.release();
+            }
             encoderSession.current = null;
             decoderSession.current = null;
+            rmbgSession.current = null;
         };
     }, []);
 
@@ -173,6 +185,9 @@ export default function Canvas() {
     }
 
     function saveState() {
+        if (stack.current.length > 10) {
+            stack.current.shift();
+        }
         const canvasState = JSON.stringify(canvasIn.current?.toJSON());
         stack.current.push(canvasState);
     }
@@ -187,11 +202,11 @@ export default function Canvas() {
 
         if (target.type === 'activeSelection') {
             const newImage = new fabric.Image(target.toCanvasElement()).set({top: target.top, left: target.left});
-            currentImage = { fabricImage: newImage, embed: null, points: null };
+            currentImage = { fabricImage: newImage as fabric.Image, embed: null, points: null };
         } else if (target.type === 'group' || target.type === 'image') {
             currentImage = images.current.find((image) => image.fabricImage === target);
             if (currentImage == null) {
-                currentImage = { fabricImage: target as fabric.Object, embed: null, points: null };
+                currentImage = { fabricImage: target as fabric.Image | fabric.Group, embed: null, points: null };
                 images.current.push(currentImage);
             }
         }
@@ -199,7 +214,7 @@ export default function Canvas() {
         if (isSegmentRef.current && currentImage) {
             console.log('segmenting');
             //scale the point to the image's local coords then to 1024x1024
-            const mCanvas = canvasIn?.current?.viewportTransform as number[];
+            const mCanvas = canvasIn.current?.viewportTransform as number[];
             const mImage = currentImage.fabricImage.calcTransformMatrix();
             const mTotal = fabric.util.multiplyTransformMatrices(mCanvas, mImage);
             const pointer = opt.pointer as fabric.Point;
@@ -234,81 +249,22 @@ export default function Canvas() {
     }
 
     async function encodeDecode(current: ImageObject) {
-        const originalImage = current.fabricImage as fabric.Image;
-        const originalWidth = originalImage.width as number;
-        const originalHeight = originalImage.height as number;
-
-        if (encoderSession.current == null || decoderSession.current == null) {
-            await loadModels(encoderSession, decoderSession);
-        }
         if (current.embed == null) {
             current.embed = await encode(current, encoderSession);
         }
 
         // Get mask
-        const output = await decode(current, decoderSession);
+        const resImage = await decode(current, decoderSession);
 
-        // Apply mask to image, TODO: toCanvasElement returns 0,0,0,255 when transparent, turning it black
-        const originalImageCanvas = originalImage.toCanvasElement({ withoutTransform: true });
-        
-        const resultTensor = await tf.tidy(() => {
-            const originalImageTensor = tf.image.resizeBilinear(tf.browser.fromPixels(originalImageCanvas), [1024, 1024])
-                .reshape([1024 * 1024, 3])
-                .concat(tf.ones([1024 * 1024, 1], 'float32').mul(255), 1);
-            
-            const maskImageData = output['masks'].toImageData();
-            
-            const maskTensor = tf.tensor(maskImageData.data, [maskImageData.data.length / 4, 4], 'float32')
-                .slice([0, 0], [-1, 3])
-                .notEqual(0).any(1).cast('int32').reshape([maskImageData.data.length / 4, 1]).tile([1, 4]);
-            
-            let resultTensor = maskTensor.mul(originalImageTensor);
-            resultTensor = tf.image.resizeBilinear(resultTensor.reshape([1024, 1024, 4]) as tf.Tensor3D, [originalHeight, originalWidth]);
-            
-            return resultTensor;
-        });
-
-        // Transformations to match the mask on the image on the canvas 
-        const resultImageData = new ImageData(new Uint8ClampedArray(await resultTensor.data()), originalWidth, originalHeight);
-        const boundingBox = findBoundingBox(resultTensor as tf.Tensor3D);
-        const left = originalImage.left as number;
-        const top = originalImage.top as number;
-        
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = originalWidth;
-        tempCanvas.height = originalHeight;
-        const tempCtx = tempCanvas.getContext('bitmaprenderer') as ImageBitmapRenderingContext;
-        tempCtx.transferFromImageBitmap(await createImageBitmap(resultImageData));
-        const resImage = new fabric.Image(tempCanvas, {
-            left: left + boundingBox.minX,
-            top: top + boundingBox.minY,
-            cropX: boundingBox.minX,
-            cropY: boundingBox.minY,
-            width: boundingBox.maxX - boundingBox.minX,
-            height: boundingBox.maxY - boundingBox.minY,
-            // @ts-ignore
-            src: tempCanvas.toDataURL(), //hack to make the image appear on load from local storage
-        });
-        
-        const mImage = originalImage.calcTransformMatrix();
-        const opt = fabric.util.qrDecompose(mImage);
-        resImage.set(opt);
-
-        const points = current.points as tf.Tensor2D;
-        points.dispose();
+        current.points?.dispose();
         current.points = null;
 
-        canvasIn?.current?.add(resImage);
-        canvasIn?.current?.setActiveObject(resImage);
+        canvasIn.current?.add(resImage);
+        canvasIn.current?.setActiveObject(resImage);
 
         if (current.fabricImage.type === 'activeSelection') {
             current.embed.dispose();
         }
-
-        resultTensor.dispose();
-        output['masks'].dispose();
-        output['iou_predictions'].dispose();
-        output['low_res_masks'].dispose();
     }
 
     async function handleOnDrop(this: CustomCanvas, opt: fabric.IEvent) {
@@ -323,7 +279,7 @@ export default function Canvas() {
                     left: e.x,
                     top: e.y,
                 });
-                canvasIn?.current?.add(imgInstance);
+                canvasIn.current?.add(imgInstance);
             }
 
             const target = eventReader.target as FileReader;
@@ -338,16 +294,16 @@ export default function Canvas() {
      }
 
     function handleDelete() {
-        const activeObjects = canvasIn?.current?.getActiveObjects() as fabric.Object[];
-        canvasIn?.current?.remove(...activeObjects);
-        canvasIn?.current?.discardActiveObject();
+        const activeObjects = canvasIn.current?.getActiveObjects() as fabric.Object[];
+        canvasIn.current?.remove(...activeObjects);
+        canvasIn.current?.discardActiveObject();
         activeObjects?.forEach((object) => {
             deleteFromImagesRef(object);
         });
     }
 
     function handleUngroup() {
-        const activeObject = canvasIn?.current?.getActiveObject() as fabric.Group;
+        const activeObject = canvasIn.current?.getActiveObject() as fabric.Group;
         if (activeObject == null || activeObject.type !== 'group') {
             return;
         }
@@ -365,7 +321,7 @@ export default function Canvas() {
     }
 
     function handleGroup() {
-        const activeObject = canvasIn?.current?.getActiveObject() as fabric.ActiveSelection;
+        const activeObject = canvasIn.current?.getActiveObject() as fabric.ActiveSelection;
         if (activeObject == null || activeObject.type !== 'activeSelection') {
             return;
         }
@@ -386,6 +342,14 @@ export default function Canvas() {
     function handleSegment() {
         setIsSegment((prev) => !prev);
     }
+    async function handleRmbg(){ 
+        //console.log(await rmbg({fabricImage:canvasIn.current.getActiveObject()}, rmbgSession));
+        const current = canvasIn.current?.getActiveObject();
+        if (current?.type == 'image') {
+            const image = await rmbg({fabricImage: current as fabric.Image, embed: null, points:null}, rmbgSession);
+            canvasIn.current?.add(image);
+        }
+    }
 
     return (
         <div>
@@ -393,7 +357,7 @@ export default function Canvas() {
                 <canvas id="canvas" ref={canvasRef} tabIndex={0}/> 
             </div>
             <div> 
-                <Menu top={menuPos.top} left={menuPos.left} isSegment={isSegment} handleSegment={handleSegment} handleDelete={handleDelete} handleGroup={handleGroup} handleUngroup={handleUngroup} />
+                <Menu top={menuPos.top} left={menuPos.left} isSegment={isSegment} handleSegment={handleSegment} handleDelete={handleDelete} handleGroup={handleGroup} handleUngroup={handleUngroup} handleRmbg={handleRmbg}/>
                 <UndoButton handleUndo={handleUndo}/>
             </div>
         </div>

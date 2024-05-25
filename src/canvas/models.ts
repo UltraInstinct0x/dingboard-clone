@@ -1,58 +1,101 @@
 import * as tf from '@tensorflow/tfjs';
 import * as ort from 'onnxruntime-web/webgpu';
+import { findBoundingBox } from './utils';
 import { ImageObject } from './interfaces';
+import { fabric } from 'fabric';
 
-async function loadModels(encoderSession: React.MutableRefObject<ort.InferenceSession | null>, decoderSession: React.MutableRefObject<ort.InferenceSession | null>) {
-    if (encoderSession.current != null && decoderSession.current != null) {
-        console.log('models already loaded');
+async function loadModel(session: React.MutableRefObject<ort.InferenceSession | null>, modelPath: string) {
+    if (session.current != null) {
+        console.log(`${modelPath} model already loaded`);
         return;
     }
     try {
-        console.log('trying to load models with webgpu');
-        encoderSession.current = await ort.InferenceSession.create(import.meta.env.BASE_URL + 'models/mobile_sam_encoder_no_preprocess.onnx', { executionProviders: ['webgpu'] });
-        decoderSession.current = await ort.InferenceSession.create(import.meta.env.BASE_URL +'models/mobilesam.decoder.onnx', { executionProviders: ['webgpu'] });
-        console.log('loaded models with webgpu');
+        console.log(`trying to load ${modelPath} model with webgpu, cpu fallback`);
+        session.current = await ort.InferenceSession.create(import.meta.env.BASE_URL + modelPath, { executionProviders: ['webgpu', 'cpu'], enableCpuMemArena: false });
+        console.log(`${modelPath} model loaded`);
     } catch (error) {
-        try {
-            console.log('failed to load webgpu, trying cpu');
-            encoderSession.current = await ort.InferenceSession.create(import.meta.env.BASE_URL + 'models/mobile_sam_encoder_no_preprocess.onnx', { executionProviders: ['cpu'] });
-            decoderSession.current = await ort.InferenceSession.create(import.meta.env.BASE_URL + 'models/mobilesam.decoder.onnx', { executionProviders: ['cpu'] });
-            console.log('loaded models with cpu');
-        }
-        catch (error) {
-            console.error('Failed to load models:', error);
-        }
+        console.error(`Failed to load ${modelPath} model:`, error);
     }
 }
-//culprit, i wasnt scaling the image to 1024x1024 properly, ort.Tensor resize was just adding border 
-async function encode(image: ImageObject, encoderSession: React.MutableRefObject<ort.InferenceSession | null>): Promise<ort.Tensor> {
+
+async function preprocessImage(image: ImageObject): Promise<ort.Tensor> {
     const imageTensor = tf.tidy(() => {
         const canvasElement = image.fabricImage.toCanvasElement();
         const resizedImage = tf.image.resizeBilinear(tf.browser.fromPixels(canvasElement), [1024, 1024]);
         return resizedImage.concat(tf.ones([1024, 1024, 1], 'float32').mul(255), 2);
     });
-
     const imageData = new ImageData(new Uint8ClampedArray(await imageTensor.data()), 1024, 1024);
     imageTensor.dispose();
 
     const imageDataTensor = await ort.Tensor.fromImage(imageData);
+    return imageDataTensor;
+}
+async function postprocessImage(mask: ort.Tensor, originalImage: fabric.Image | fabric.Group): Promise<fabric.Image> {
+    const originalImageCanvas = originalImage.toCanvasElement({ withoutTransform: true });
+    const originalWidth = originalImage.width as number;
+    const originalHeight = originalImage.height as number;
 
+    const resultTensor = tf.tidy(() => {
+        const originalImageTensor = tf.image.resizeBilinear(tf.browser.fromPixels(originalImageCanvas), [1024, 1024])
+            .reshape([1024 * 1024, 3])
+            .concat(tf.ones([1024 * 1024, 1], 'float32').mul(255), 1);
+        
+        const maskImageData = mask.toImageData();
+        
+        const maskTensor = tf.tensor(maskImageData.data, [maskImageData.data.length / 4, 4], 'float32')
+            .slice([0, 0], [-1, 3])
+            .notEqual(0).any(1).cast('int32').reshape([maskImageData.data.length / 4, 1]).tile([1, 4]);
+        
+        let resultTensor = maskTensor.mul(originalImageTensor);
+        resultTensor = tf.image.resizeBilinear(resultTensor.reshape([1024, 1024, 4]) as tf.Tensor3D, [originalHeight, originalWidth]);
+        
+        return resultTensor;
+    });
+   // Transformations to match the mask on the image on the canvas 
+    const resultImageData = new ImageData(new Uint8ClampedArray(await resultTensor.data()), originalWidth, originalHeight);
+    const boundingBox = findBoundingBox(resultTensor as tf.Tensor3D);
+    const left = originalImage.left as number;
+    const top = originalImage.top as number;
+    
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = originalWidth;
+    tempCanvas.height = originalHeight;
+    const tempCtx = tempCanvas.getContext('bitmaprenderer') as ImageBitmapRenderingContext;
+    tempCtx.transferFromImageBitmap(await createImageBitmap(resultImageData));
+    const resImage = new fabric.Image(tempCanvas, {
+        left: left + boundingBox.minX,
+        top: top + boundingBox.minY,
+        cropX: boundingBox.minX,
+        cropY: boundingBox.minY,
+        width: boundingBox.maxX - boundingBox.minX,
+        height: boundingBox.maxY - boundingBox.minY,
+        // @ts-ignore
+        src: tempCanvas.toDataURL(), //hack to make the image appear on load from local storage
+    });
+    
+    const mImage = originalImage.calcTransformMatrix();
+    const opt = fabric.util.qrDecompose(mImage);
+    resImage.set(opt);
+
+    resultTensor.dispose();
+    return resImage;
+}
+
+
+//culprit, i wasnt scaling the image to 1024x1024 properly, ort.Tensor resize was just adding border 
+async function encode(image: ImageObject, encoderSession: React.MutableRefObject<ort.InferenceSession | null>): Promise<ort.Tensor> {
+
+    const imageDataTensor = await preprocessImage(image) as ort.Tensor;
     const encoder_inputs = { "input_image": imageDataTensor };
 
-    const session = encoderSession.current ? encoderSession.current as ort.InferenceSession : null;
-    if (session == null) {
-        imageDataTensor.dispose(); 
-        throw new Error('encoder not loaded');
-    }
-
-    const output = await session.run(encoder_inputs);
+    const output = await encoderSession.current!.run(encoder_inputs);
     const image_embedding = output['image_embeddings'];
 
     imageDataTensor.dispose(); 
     return image_embedding;
 }
 
-async function decode(image: ImageObject, decoderSession: React.MutableRefObject<ort.InferenceSession | null>): Promise<ort.InferenceSession.OnnxValueMapType> {
+async function decode(image: ImageObject, decoderSession: React.MutableRefObject<ort.InferenceSession | null>): Promise<fabric.Image> {
     const point_coords = tf.tidy(() => {
         const input_points = image.points as tf.Tensor2D;
         const additional_point = tf.tensor([[0.0, 0.0]], [1, 2], 'float32');
@@ -82,17 +125,7 @@ async function decode(image: ImageObject, decoderSession: React.MutableRefObject
         "orig_im_size": orig_im_size_ortTensor 
     } as ort.InferenceSession.OnnxValueMapType;
 
-    const session = decoderSession.current ? decoderSession.current as ort.InferenceSession : null;
-    if (session == null) {
-        point_coords_ortTensor.dispose();
-        point_labels_ortTensor.dispose();
-        mask_input_ortTensor.dispose();
-        has_mask_input_ortTensor.dispose();
-        orig_im_size_ortTensor.dispose();
-        throw new Error('decoder not loaded');
-    }
-
-    const output = await session.run(decoder_inputs) as ort.InferenceSession.OnnxValueMapType;
+    const output = await decoderSession.current!.run(decoder_inputs) as ort.InferenceSession.OnnxValueMapType;
 
     point_coords.dispose();
     point_coords_ortTensor.dispose();
@@ -102,6 +135,25 @@ async function decode(image: ImageObject, decoderSession: React.MutableRefObject
     has_mask_input_ortTensor.dispose();
     orig_im_size_ortTensor.dispose();
 
-    return output;
+    const resultImage = await postprocessImage(output["masks"], image.fabricImage as fabric.Image | fabric.Group);
+
+    output['masks'].dispose();
+    output['iou_predictions'].dispose();
+    output['low_res_masks'].dispose();
+
+    return resultImage;
+
 }
-export { encode, decode, loadModels};
+async function rmbg(image: ImageObject, rembgSession: React.MutableRefObject<ort.InferenceSession | null>): Promise<fabric.Image> {
+    const input = await preprocessImage(image) as ort.Tensor;
+    const rembg_inputs = {
+        "input": input
+    } as ort.InferenceSession.OnnxValueMapType;
+
+    const output = await rembgSession.current!.run(rembg_inputs) as ort.InferenceSession.OnnxValueMapType;
+    const resImage = await postprocessImage(output["output"], image.fabricImage as fabric.Image);
+    return resImage;
+}
+
+export { loadModel, encode, decode, rmbg, postprocessImage};
+
