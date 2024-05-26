@@ -3,7 +3,7 @@ import * as tf from '@tensorflow/tfjs';
 import * as ort from 'onnxruntime-web/webgpu';
 import { fabric } from 'fabric';
 import Menu from './Menu';
-import { encode, decode, loadModel, rmbg } from './models';
+import { encode, decode, loadModel, rmbg, depth } from './models';
 import { ImageObject, CustomCanvas } from './interfaces';
 import { handleMouseDown, handleMouseMove, handleMouseUp, handleMouseWheel} from './utils';
 import UndoButton from './UndoButton';
@@ -34,6 +34,7 @@ const useFabric = (canvas: React.MutableRefObject<fabric.Canvas | null>, stack: 
     return fabricRef;
 }
 
+const depthModelPath = 'models/depth_anything_vits14.onnx';
 const encoderModelPath = 'models/mobile_sam_encoder_no_preprocess.onnx';
 const decoderModelPath = 'models/mobilesam.decoder.onnx';
 const rmbgModelPath = 'models/rmbg.quantized.onnx';
@@ -53,10 +54,10 @@ export default function Canvas() {
     const encoderSession = useRef<ort.InferenceSession | null>(null);
     const decoderSession = useRef<ort.InferenceSession | null>(null);
     const rmbgSession = useRef<ort.InferenceSession | null>(null);
+    const depthSession = useRef<ort.InferenceSession | null>(null);
     const [menuPos, setMenuPos] = useState<{ top: number | null, left: number | null }>({ top: null, left: null});
     const [isSegment, setIsSegment] = useState(false);
     const isSegmentRef = useRef(isSegment);
-
 
     isSegmentRef.current = isSegment;
 
@@ -141,7 +142,7 @@ export default function Canvas() {
     useEffect(() => {
         loadModel(encoderSession, encoderModelPath);
         loadModel(decoderSession, decoderModelPath);
-        loadModel(rmbgSession, rmbgModelPath);
+        loadModel(depthSession, depthModelPath);
         return () => {
             if (encoderSession.current) {
                 console.log('releasing encoder');
@@ -151,13 +152,13 @@ export default function Canvas() {
                 console.log('releasing decoder');
                 decoderSession.current.release();
             }
-            if (rmbgSession.current) {
-                console.log('releasing rmbgSession');
-                rmbgSession.current.release();
+            if (depthSession.current) {
+                console.log('releasing depthSession');
+                depthSession.current.release();
             }
             encoderSession.current = null;
             decoderSession.current = null;
-            rmbgSession.current = null;
+            depthSession.current = null;
         };
     }, []);
 
@@ -346,7 +347,7 @@ export default function Canvas() {
         //console.log(await rmbg({fabricImage:canvasIn.current.getActiveObject()}, rmbgSession));
         const current = canvasIn.current?.getActiveObject();
         if (current?.type == 'image') {
-            const image = await rmbg({fabricImage: current as fabric.Image, embed: null, points:null}, rmbgSession);
+            const image = await depth({fabricImage: current as fabric.Image, embed: null, points:null}, depthSession);
             canvasIn.current?.add(image);
         }
     }

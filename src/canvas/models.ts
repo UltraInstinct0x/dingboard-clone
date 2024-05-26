@@ -21,13 +21,15 @@ async function loadModel(session: React.MutableRefObject<ort.InferenceSession | 
 async function preprocessImage(image: ImageObject): Promise<ort.Tensor> {
     const imageTensor = tf.tidy(() => {
         const canvasElement = image.fabricImage.toCanvasElement();
-        const resizedImage = tf.image.resizeBilinear(tf.browser.fromPixels(canvasElement), [1024, 1024]);
-        return resizedImage.concat(tf.ones([1024, 1024, 1], 'float32').mul(255), 2);
+        let resizedImage = tf.image.resizeBilinear(tf.browser.fromPixels(canvasElement, 4), [1024, 1024]);
+        const temp = resizedImage.reshape([1, 4, 1024, 1024]);
+        return temp;
     });
-    const imageData = new ImageData(new Uint8ClampedArray(await imageTensor.data()), 1024, 1024);
-    imageTensor.dispose();
 
+    const imageData = new ImageData(new Uint8ClampedArray(await imageTensor.data()), 1024, 1024);
     const imageDataTensor = await ort.Tensor.fromImage(imageData);
+    //const imageDataTensor = new ort.Tensor('float32', await imageTensor.data(), [1, 3, 1024, 1024]);
+    imageTensor.dispose();
     return imageDataTensor;
 }
 async function postprocessImage(mask: ort.Tensor, originalImage: fabric.Image | fabric.Group): Promise<fabric.Image> {
@@ -155,5 +157,32 @@ async function rmbg(image: ImageObject, rembgSession: React.MutableRefObject<ort
     return resImage;
 }
 
-export { loadModel, encode, decode, rmbg, postprocessImage};
+async function depth(image: ImageObject, depthSession: React.MutableRefObject<ort.InferenceSession | null>): Promise<fabric.Image> {
+    const originalImage = image.fabricImage as fabric.Image;
+    let input = await preprocessImage(image) as ort.Tensor;
+    const depth_inputs = {
+        "image": input
+    } as ort.InferenceSession.OnnxValueMapType;
 
+    const output = (await depthSession.current!.run(depth_inputs) as ort.InferenceSession.OnnxValueMapType)["depth"] as ort.Tensor;
+
+    const outputData = new Float32Array(await output.getData());
+    const outputTensor = tf.tidy(() => {
+        const depthTensor = tf.tensor(outputData, output.dims, 'float32');
+        const max = depthTensor.max();
+        const min = depthTensor.min();
+        let temp = tf.sub(depthTensor, min).div(tf.sub(max, min)).mul(255.0);
+        temp = tf.reshape(temp, [1024, 1024, 1]);
+        temp = tf.image.resizeBilinear(temp, [originalImage.height as number, originalImage.width as number]).cast('int32');
+        return temp;
+    });
+
+    const resImageData = new ImageData(await tf.browser.toPixels(outputTensor as tf.Tensor3D), originalImage.width, originalImage.height as number);
+    const resImage = new fabric.Image(await createImageBitmap(resImageData), {
+        left: originalImage.left,
+        top: originalImage.top,
+    });
+    return resImage;
+}
+
+export { loadModel, encode, decode, rmbg, postprocessImage, depth};

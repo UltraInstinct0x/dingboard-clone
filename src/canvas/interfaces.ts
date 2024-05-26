@@ -5,6 +5,7 @@ interface ImageObject {
     fabricImage: fabric.Image | fabric.Group;
     embed: ort.Tensor | null;
     points: tf.Tensor2D | null;
+    background: fabric.Image | null;
 }
 interface CustomCanvas extends fabric.Canvas {
     lastPosX: number;
