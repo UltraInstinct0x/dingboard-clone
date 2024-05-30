@@ -5,7 +5,7 @@ interface ImageObject {
     fabricImage: fabric.Image | fabric.Group;
     embed: ort.Tensor | null;
     points: tf.Tensor2D | null;
-    background: fabric.Image | null;
+    mask: tf.Tensor3D | null;
 }
 interface CustomCanvas extends fabric.Canvas {
     lastPosX: number;
@@ -21,6 +21,9 @@ interface MenuProps {
     isSegment: boolean;
     handleSegment: () => void;
     handleRmbg: () => void;
+    isRmbg: boolean;
+    handleRmbgSlider: (e: React.ChangeEvent<HTMLInputElement>) => Promise<void>
+    rmbgSliderValue: number;
 }
 
 export type { ImageObject, CustomCanvas, MenuProps };

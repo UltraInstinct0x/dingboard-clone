@@ -157,8 +157,7 @@ async function rmbg(image: ImageObject, rembgSession: React.MutableRefObject<ort
     return resImage;
 }
 
-async function depth(image: ImageObject, depthSession: React.MutableRefObject<ort.InferenceSession | null>): Promise<fabric.Image> {
-    const originalImage = image.fabricImage as fabric.Image;
+async function depth(image: ImageObject, depthSession: React.MutableRefObject<ort.InferenceSession | null>): Promise<tf.Tensor3D> {
     let input = await preprocessImage(image) as ort.Tensor;
     const depth_inputs = {
         "image": input
@@ -166,23 +165,18 @@ async function depth(image: ImageObject, depthSession: React.MutableRefObject<or
 
     const output = (await depthSession.current!.run(depth_inputs) as ort.InferenceSession.OnnxValueMapType)["depth"] as ort.Tensor;
 
-    const outputData = new Float32Array(await output.getData());
+    const outputData = await output.getData() as Float32Array;
     const outputTensor = tf.tidy(() => {
-        const depthTensor = tf.tensor(outputData, output.dims, 'float32');
+        const depthTensor = tf.tensor(outputData, output.dims as number[], 'float32');
         const max = depthTensor.max();
         const min = depthTensor.min();
         let temp = tf.sub(depthTensor, min).div(tf.sub(max, min)).mul(255.0);
         temp = tf.reshape(temp, [1024, 1024, 1]);
-        temp = tf.image.resizeBilinear(temp, [originalImage.height as number, originalImage.width as number]).cast('int32');
+        //temp = tf.image.resizeBilinear(temp, [originalImage.height as number, originalImage.width as number]).cast('int32');
         return temp;
     });
 
-    const resImageData = new ImageData(await tf.browser.toPixels(outputTensor as tf.Tensor3D), originalImage.width, originalImage.height as number);
-    const resImage = new fabric.Image(await createImageBitmap(resImageData), {
-        left: originalImage.left,
-        top: originalImage.top,
-    });
-    return resImage;
+    return outputTensor as tf.Tensor3D;
 }
 
 export { loadModel, encode, decode, rmbg, postprocessImage, depth};

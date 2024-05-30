@@ -3,7 +3,7 @@ import * as tf from '@tensorflow/tfjs';
 import * as ort from 'onnxruntime-web/webgpu';
 import { fabric } from 'fabric';
 import Menu from './Menu';
-import { encode, decode, loadModel, rmbg, depth } from './models';
+import { encode, decode, loadModel, depth } from './models';
 import { ImageObject, CustomCanvas } from './interfaces';
 import { handleMouseDown, handleMouseMove, handleMouseUp, handleMouseWheel} from './utils';
 import UndoButton from './UndoButton';
@@ -37,7 +37,7 @@ const useFabric = (canvas: React.MutableRefObject<fabric.Canvas | null>, stack: 
 const depthModelPath = 'models/depth_anything_vits14.onnx';
 const encoderModelPath = 'models/mobile_sam_encoder_no_preprocess.onnx';
 const decoderModelPath = 'models/mobilesam.decoder.onnx';
-const rmbgModelPath = 'models/rmbg.quantized.onnx';
+//const rmbgModelPath = 'models/rmbg.quantized.onnx';
 ort.env.wasm.wasmPaths = import.meta.env.BASE_URL + 'wasm-files/';
 if (self.crossOriginIsolated) {
     ort.env.wasm.numThreads = Math.ceil(navigator.hardwareConcurrency / 2);
@@ -51,14 +51,17 @@ export default function Canvas() {
     const stack = useRef<String[]>([]);
     const canvasRef = useFabric(canvasIn, stack);
     const images = useRef<ImageObject[]>([]);
+
     const encoderSession = useRef<ort.InferenceSession | null>(null);
     const decoderSession = useRef<ort.InferenceSession | null>(null);
-    const rmbgSession = useRef<ort.InferenceSession | null>(null);
+    //const rmbgSession = useRef<ort.InferenceSession | null>(null);
     const depthSession = useRef<ort.InferenceSession | null>(null);
+
     const [menuPos, setMenuPos] = useState<{ top: number | null, left: number | null }>({ top: null, left: null});
     const [isSegment, setIsSegment] = useState(false);
+    const [isRmbg, setIsRmbg] = useState(false);
+    const [rmbgSliderValue, setRmbgSliderValue] = useState(0);
     const isSegmentRef = useRef(isSegment);
-
     isSegmentRef.current = isSegment;
 
     useEffect(() => {
@@ -104,13 +107,21 @@ export default function Canvas() {
 
         setMenuPos({ top: null, left: null });
         setIsSegment(false);
+        setIsRmbg(false);
         images.current.forEach((image) => {
             if (image.embed) {
                 image.embed.dispose();
             }
+            if (image.points) {
+                image.points.dispose();
+            }
+            if (image.mask) {
+                image.mask.dispose();
+            }
         });
         images.current = [];
-
+        usingSlider.current = false;
+        
       }
     }, []);
 
@@ -165,6 +176,8 @@ export default function Canvas() {
     function hideMenu() {
         setMenuPos({ top: null, left: null });
         setIsSegment(false);
+        setIsRmbg(false);
+
     }
 
     function updateMenu(opt: fabric.IEvent) {
@@ -203,11 +216,11 @@ export default function Canvas() {
 
         if (target.type === 'activeSelection') {
             const newImage = new fabric.Image(target.toCanvasElement()).set({top: target.top, left: target.left});
-            currentImage = { fabricImage: newImage as fabric.Image, embed: null, points: null };
+            currentImage = { fabricImage: newImage as fabric.Image, embed: null, points: null, mask: null };
         } else if (target.type === 'group' || target.type === 'image') {
             currentImage = images.current.find((image) => image.fabricImage === target);
             if (currentImage == null) {
-                currentImage = { fabricImage: target as fabric.Image | fabric.Group, embed: null, points: null };
+                currentImage = { fabricImage: target as fabric.Image | fabric.Group, embed: null, points: null, mask: null};
                 images.current.push(currentImage);
             }
         }
@@ -343,13 +356,72 @@ export default function Canvas() {
     function handleSegment() {
         setIsSegment((prev) => !prev);
     }
+
     async function handleRmbg(){ 
-        //console.log(await rmbg({fabricImage:canvasIn.current.getActiveObject()}, rmbgSession));
-        const current = canvasIn.current?.getActiveObject();
-        if (current?.type == 'image') {
-            const image = await depth({fabricImage: current as fabric.Image, embed: null, points:null}, depthSession);
-            canvasIn.current?.add(image);
+        if (isRmbg) {
+            setIsRmbg(false);
+            return;
         }
+
+        const current = canvasIn.current?.getActiveObject();
+        if (current?.type == 'image' || current?.type == 'group') {
+            let currentImage = images.current.find((image) => image.fabricImage === current);
+            if (currentImage == null) {
+                currentImage = { fabricImage: current as fabric.Image | fabric.Group, embed: null, points: null, mask: null};
+                images.current.push(currentImage);
+            }
+            let resMask;
+            if (currentImage.mask == null) {
+                resMask = await depth(currentImage, depthSession);
+                currentImage.mask = resMask;
+            } else {
+                resMask = currentImage.mask;
+            }
+            setRmbgSliderValue(0);
+            setIsRmbg(true);
+        }
+    }
+
+    async function getClipImage(image: ImageObject, sliderValue: number) {
+        const res = tf.tidy(() => {
+            const mask = image!.mask as tf.Tensor3D;
+            const max = mask.max().dataSync()[0];
+            const min = mask.min().dataSync()[0];
+            const threshold = (max - min) * sliderValue / 100 + min;
+            const clippedMask = mask.lessEqual(threshold);
+            const clippedMaskInt = clippedMask.cast('int32').mul(255).tile([1, 1, 4]);
+            return tf.image.resizeBilinear(clippedMaskInt as tf.Tensor3D, [image.fabricImage.height as number, image.fabricImage.width as number]).cast('int32');
+        });
+        const maskImageData = new ImageData(await tf.browser.toPixels(res as tf.Tensor3D) as Uint8ClampedArray, image.fabricImage.width as number, image.fabricImage.height as number);
+        res.dispose();
+        // @ts-ignore
+        const mask = new fabric.Image(await createImageBitmap(maskImageData));
+        return mask;
+    }
+    
+    const usingSlider = useRef(false);
+    async function handleRmbgSlider(e: React.ChangeEvent<HTMLInputElement>) {
+        if (!isRmbg) {
+            return;
+        }
+        if (usingSlider.current) {
+            return;
+        }
+        usingSlider.current = true;
+        setRmbgSliderValue(parseInt(e.target.value));
+        const current = canvasIn.current?.getActiveObject();
+        if (current?.type == 'image' || current?.type == 'group') {
+            let currentImage = images.current.find((image) => image.fabricImage === current);
+            if (currentImage == null) {
+                return;
+            }
+            const maskImage = await getClipImage(currentImage, parseInt(e.target.value))
+            maskImage.set({top: 0, left: 0, originX: 'center', originY: 'center', inverted: true});
+            currentImage.fabricImage.clipPath = maskImage;
+            currentImage.fabricImage.dirty = true;
+            canvasIn.current?.renderAll();
+        }
+        usingSlider.current = false;
     }
 
     return (
@@ -358,7 +430,7 @@ export default function Canvas() {
                 <canvas id="canvas" ref={canvasRef} tabIndex={0}/> 
             </div>
             <div> 
-                <Menu top={menuPos.top} left={menuPos.left} isSegment={isSegment} handleSegment={handleSegment} handleDelete={handleDelete} handleGroup={handleGroup} handleUngroup={handleUngroup} handleRmbg={handleRmbg}/>
+                <Menu top={menuPos.top} left={menuPos.left} isSegment={isSegment} handleSegment={handleSegment} handleDelete={handleDelete} handleGroup={handleGroup} handleUngroup={handleUngroup} handleRmbg={handleRmbg} isRmbg={isRmbg} handleRmbgSlider={handleRmbgSlider} rmbgSliderValue={rmbgSliderValue}/>
                 <UndoButton handleUndo={handleUndo}/>
             </div>
         </div>
