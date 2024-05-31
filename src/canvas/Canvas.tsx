@@ -87,7 +87,6 @@ export default function Canvas() {
         canvas.on('mouse:wheel', handleMouseWheel);
 
         //undo 
-        canvas.on('object:added', saveState);
         canvas.on('object:modified', saveState);
 
       return () => {
@@ -102,7 +101,6 @@ export default function Canvas() {
         canvas.off('mouse:move', handleMouseMove);
         canvas.off('mouse:up', handleMouseUp);
         canvas.off('mouse:wheel', handleMouseWheel);
-        canvas.off('object:added', saveState);
         canvas.off('object:modified', saveState);
 
         setMenuPos({ top: null, left: null });
@@ -274,6 +272,7 @@ export default function Canvas() {
         current.points = null;
 
         canvasIn.current?.add(resImage);
+        saveState();
         canvasIn.current?.setActiveObject(resImage);
 
         if (current.fabricImage.type === 'activeSelection') {
@@ -294,6 +293,7 @@ export default function Canvas() {
                     top: e.y,
                 });
                 canvasIn.current?.add(imgInstance);
+                saveState();
             }
 
             const target = eventReader.target as FileReader;
@@ -314,6 +314,8 @@ export default function Canvas() {
         activeObjects?.forEach((object) => {
             deleteFromImagesRef(object);
         });
+        saveState();
+
     }
 
     function handleUngroup() {
@@ -344,9 +346,10 @@ export default function Canvas() {
     }
 
     function handleUndo() {
+        console.log(stack.current);
         if (stack.current.length > 1) {
             stack.current.pop();
-            const canvasState = stack.current.pop();
+            const canvasState = stack.current[stack.current.length - 1];
             canvasIn.current?.loadFromJSON(canvasState, () => {
                 canvasIn.current?.renderAll();
             });
