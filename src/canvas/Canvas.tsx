@@ -345,8 +345,8 @@ export default function Canvas() {
         setMenuPos(menuPos);
     }
 
+
     function handleUndo() {
-        console.log(stack.current);
         if (stack.current.length > 1) {
             stack.current.pop();
             const canvasState = stack.current[stack.current.length - 1];
@@ -427,10 +427,34 @@ export default function Canvas() {
         usingSlider.current = false;
     }
 
+    function handleKeyDown(e: React.KeyboardEvent) {
+        console.log(e);
+        if (e.ctrlKey && e.key === 'z') {
+            handleUndo();
+        }
+        else if (e.key === 's') {
+            if (e.ctrlKey) {
+                saveState();
+            } else {
+                handleSegment();
+            }
+        }
+        else if (e.key === 'Backspace') {
+            handleDelete();
+        }
+        else if (e.key === 'g') {
+            handleGroup();
+        }
+        else if (e.key === 'u') {
+            handleUngroup();
+        }
+        return;
+    }
+
     return (
-        <div>
+        <div onKeyDown={handleKeyDown} tabIndex={0}>
             <div>
-                <canvas id="canvas" ref={canvasRef} tabIndex={0}/> 
+                <canvas id="canvas" ref={canvasRef} /> 
             </div>
             <div> 
                 <Menu top={menuPos.top} left={menuPos.left} isSegment={isSegment} handleSegment={handleSegment} handleDelete={handleDelete} handleGroup={handleGroup} handleUngroup={handleUngroup} handleRmbg={handleRmbg} isRmbg={isRmbg} handleRmbgSlider={handleRmbgSlider} rmbgSliderValue={rmbgSliderValue}/>
