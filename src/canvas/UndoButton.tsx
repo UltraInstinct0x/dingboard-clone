@@ -7,7 +7,7 @@ interface UndoButtonProps {
 export default function UndoButton({ handleUndo }: UndoButtonProps) {
     return (
         <div className="absolute flex bottom-1 right-1">
-            <Button Icon={SlActionUndo} onClick={handleUndo}/>
+            <Button id="undo" Icon={SlActionUndo} onClick={handleUndo} shortcut="Ctrl+z" tooltipText="Undo"/>
         </div>
     )
 }

@@ -1,15 +1,30 @@
+import { Tooltip } from 'react-tooltip'
+
 interface ButtonProps {
+    id: string
     Icon: React.ComponentType
     onClick: () => void
     isActive?: boolean
+    shortcut: string | null 
+    tooltipText: string | null
 }
 
-export default function Button({ Icon, isActive = false, onClick}: ButtonProps) {
+export default function Button({ id, Icon, isActive = false, onClick, shortcut = null, tooltipText = null}: ButtonProps) {
 
     return (
-        <div className={`${isActive ? "bg-slate-900" : "bg-slate-700"} hover:bg-slate-800 active:bg-slate-700 py-1 px-1 rounded-none`} onClick={onClick}>
-            <Icon />
-        </div>
+        <>
+            <a className={id}>
+                <button className={`${isActive ? "bg-slate-900" : "bg-slate-700"} hover:bg-slate-800 active:bg-slate-700 p-2 rounded-none`} onClick={onClick}>
+                    <Icon />
+                </button>
+            </a>
+            <Tooltip anchorSelect={"."+id}>
+                <div className="flex flex-col">
+                    <span> {tooltipText} </span>
+                    <span className="text-xs"> Shortcut: {shortcut} </span>
+                </div>
+            </Tooltip>
+        </>
     )
 }
 

@@ -10,14 +10,21 @@ export default function Menu({ top, left, handleDelete, handleGroup, handleUngro
     }
     const topSlider = top + 50;
     const leftSlider = left + 50;
+    const tooltipTexts = {
+        "segment": "Click this then click on the part that you want to segment.", 
+        "rmbg": "Click then wait until a slider appears that allows you to remove background.",
+        "delete": "Delete element/s",
+        "group": "Groups elements",
+        "ungroup": "Ungroups elements",
+    }
     return (
         <>
-            <div className="absolute flex" style={{top: top, left: left}}>
-                <Button Icon={SlPuzzle} isActive={isSegment===true} onClick={handleSegment} />
-                <Button Icon={TbBackground} isActive={isRmbg===true} onClick={handleRmbg}/>
-                <Button Icon={SlTrash}  onClick={handleDelete}/>
-                <Button Icon={FaRegObjectGroup} onClick={handleGroup}/>
-                <Button Icon={FaRegObjectUngroup} onClick={handleUngroup}/>
+            <div className="absolute flex flex-col" style={{top: top, left: left}}>
+                <Button id="segment" Icon={SlPuzzle} isActive={isSegment===true} onClick={handleSegment} shortcut="s" tooltipText={tooltipTexts["segment"]}/>
+                <Button id="rmbg" Icon={TbBackground} isActive={isRmbg===true} onClick={handleRmbg} shortcut="r" tooltipText={tooltipTexts["rmbg"]}/>
+                <Button id="delete" Icon={SlTrash}  onClick={handleDelete} shortcut="Backspace" tooltipText={tooltipTexts["delete"]}/>
+                <Button id="group" Icon={FaRegObjectGroup} onClick={handleGroup} shortcut="g" tooltipText={tooltipTexts["group"]}/>
+                <Button id="ungroup" Icon={FaRegObjectUngroup} onClick={handleUngroup} shortcut="u" tooltipText={tooltipTexts["ungroup"]}/>
             </div>
             //slider
             <div className={`${isRmbg ? "visible"  : "invisible"} absolute flex`} style={{top: topSlider, left: leftSlider}}>

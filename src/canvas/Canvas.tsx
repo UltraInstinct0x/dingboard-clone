@@ -193,7 +193,7 @@ export default function Canvas() {
         } else { //selecting an image
             point = getGlobalCoords(opt.selected![0]);
         }
-        setMenuPos({ top: point.y as number - 30, left: point.x as number });
+        setMenuPos({ top: point.y as number , left: point.x - 50 as number });
     }
 
     function saveState() {
@@ -428,7 +428,6 @@ export default function Canvas() {
     }
 
     function handleKeyDown(e: React.KeyboardEvent) {
-        console.log(e);
         if (e.ctrlKey && e.key === 'z') {
             handleUndo();
         }
@@ -438,6 +437,9 @@ export default function Canvas() {
             } else {
                 handleSegment();
             }
+        }
+        else if (e.key === 'r') {
+            handleRmbg();
         }
         else if (e.key === 'Backspace') {
             handleDelete();
