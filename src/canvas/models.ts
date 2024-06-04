@@ -34,8 +34,8 @@ async function preprocessImage(image: ImageObject): Promise<ort.Tensor> {
 }
 async function postprocessImage(mask: ort.Tensor, originalImage: fabric.Image | fabric.Group): Promise<fabric.Image> {
     const originalImageCanvas = originalImage.toCanvasElement({ withoutTransform: true });
-    const originalWidth = originalImage.width as number;
-    const originalHeight = originalImage.height as number;
+    const originalWidth = Math.round(originalImage.width as number);
+    const originalHeight = Math.round(originalImage.height as number);
 
     const resultTensor = tf.tidy(() => {
         const originalImageTensor = tf.image.resizeBilinear(tf.browser.fromPixels(originalImageCanvas), [1024, 1024])
