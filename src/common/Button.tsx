@@ -1,4 +1,5 @@
-import { Tooltip } from 'react-tooltip'
+import { memo } from 'react';
+import { Tooltip } from 'react-tooltip';
 
 interface ButtonProps {
     id: string
@@ -9,7 +10,7 @@ interface ButtonProps {
     tooltipText: string | null
 }
 
-export default function Button({ id, Icon, isActive = false, onClick, shortcut = null, tooltipText = null}: ButtonProps) {
+function Button({ id, Icon, isActive = false, onClick, shortcut = null, tooltipText = null}: ButtonProps) {
 
     return (
         <>
@@ -28,4 +29,4 @@ export default function Button({ id, Icon, isActive = false, onClick, shortcut =
     )
 }
 
-
+export default memo(Button);
