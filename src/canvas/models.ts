@@ -159,18 +159,28 @@ async function decode(image: ImageObject, decoderSession: React.MutableRefObject
     return resultImage;
 
 }
-async function rmbg(image: ImageObject, rembgSession: React.MutableRefObject<ort.InferenceSession | null>): Promise<fabric.Image> {
-    const input = await preprocessImage(image) as ort.Tensor;
-    const rembg_inputs = {
-        "input": input
-    } as ort.InferenceSession.OnnxValueMapType;
 
-    const output = await rembgSession.current!.run(rembg_inputs) as ort.InferenceSession.OnnxValueMapType;
-    const resImage = await postprocessImage(output["output"], image.fabricImage as fabric.Image);
+async function getSegment(current: ImageObject, encoderSession: React.MutableRefObject<ort.InferenceSession | null>, decoderSession: React.MutableRefObject<ort.InferenceSession | null>): Promise<fabric.Image> {
+    if (current.embed == null) {
+        current.embed = await encode(current, encoderSession);
+    }
+
+    // Get mask
+    const resImage = await decode(current, decoderSession);
+
+    current.points?.dispose();
+    current.points = null;
+    current.pointLabels?.dispose();
+    current.pointLabels = null;
+
+    if (current.fabricImage.type === 'activeSelection') {
+        current.embed.dispose();
+    }
+
     return resImage;
 }
 
-async function depth(image: ImageObject, depthSession: React.MutableRefObject<ort.InferenceSession | null>): Promise<tf.Tensor3D> {
+async function getMaskTensor(image: ImageObject, depthSession: React.MutableRefObject<ort.InferenceSession | null>): Promise<tf.Tensor3D> {
     let input = await preprocessImage(image) as ort.Tensor;
     const depth_inputs = {
         "image": input
@@ -192,4 +202,4 @@ async function depth(image: ImageObject, depthSession: React.MutableRefObject<or
     return outputTensor as tf.Tensor3D;
 }
 
-export { loadModel, encode, decode, rmbg, postprocessImage, depth};
+export { loadModel, encode, decode, postprocessImage, getMaskTensor, getSegment};

@@ -1,44 +1,18 @@
-import { useCallback, useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useState } from "react";
 import * as tf from '@tensorflow/tfjs';
 import * as ort from 'onnxruntime-web/webgpu';
 import { fabric } from 'fabric';
 import Menu from './Menu';
-import { encode, decode, loadModel, depth } from './models';
+import { getSegment, loadModel, getMaskTensor } from './models';
 import { ImageObject, CustomCanvas } from './interfaces';
-import { handleMouseDown, handleMouseMove, handleMouseUp, handleMouseWheel, findObjectInImages} from './utils';
+import { handleMouseDownPZ, handleMouseMovePZ, handleMouseUpPZ, handleMouseWheelPZ, findObjectInImages, getMaskImage, deleteFromImagesRef} from './utils';
 import UndoButton from './UndoButton';
 import SegmentMenu from './SegmentMenu';
-
-const useFabric = (canvas: React.MutableRefObject<fabric.Canvas | null>, stack: React.MutableRefObject<String[]>) => {
-    const fabricRef = useCallback((element: HTMLCanvasElement | null) => {
-        if (!element) {
-            canvas.current?.dispose();
-            canvas.current = null;
-            stack.current = [];
-            return;
-        }
-        canvas.current = new fabric.Canvas(element, {backgroundColor: 'Gainsboro', preserveObjectStacking: true});
-        if (localStorage.getItem('canvas')) {
-            canvas.current?.loadFromJSON(JSON.parse(localStorage.getItem('canvas') as string), () => {
-                canvas.current?.renderAll();
-                console.log('loaded canvas from local storage');
-            });
-        }
-        if (localStorage.getItem('stack')) {
-            stack.current = JSON.parse(localStorage.getItem('stack') as string);
-        }
-        fabric.Object.prototype.transparentCorners = false;
-        fabric.Object.prototype.cornerColor = 'white';
-        fabric.Object.prototype.cornerStrokeColor = 'black';
-        fabric.Object.prototype.borderColor = 'black';
-    }, []);
-    return fabricRef;
-}
+import { useFabric } from './customHooks';
 
 const depthModelPath = 'models/depth_anything_vits14.onnx';
 const encoderModelPath = 'models/mobile_sam_encoder_no_preprocess.onnx';
 const decoderModelPath = 'models/mobilesam.decoder.onnx';
-//const rmbgModelPath = 'models/rmbg.quantized.onnx';
 ort.env.wasm.wasmPaths = import.meta.env.BASE_URL + 'wasm-files/';
 if (self.crossOriginIsolated) {
     ort.env.wasm.numThreads = Math.ceil(navigator.hardwareConcurrency / 2);
@@ -55,13 +29,12 @@ export default function Canvas() {
 
     const encoderSession = useRef<ort.InferenceSession | null>(null);
     const decoderSession = useRef<ort.InferenceSession | null>(null);
-    //const rmbgSession = useRef<ort.InferenceSession | null>(null);
     const depthSession = useRef<ort.InferenceSession | null>(null);
-
-    const [menuPos, setMenuPos] = useState<{ top: number | null, left: number | null }>({ top: null, left: null});
 
     const [isRmbg, setIsRmbg] = useState(false);
     const [rmbgSliderValue, setRmbgSliderValue] = useState(0);
+
+    const [menuPos, setMenuPos] = useState<{ top: number | null, left: number | null }>({ top: null, left: null});
 
     const [segmentMenuPos, setSegmentMenuPos] = useState<{ top: number | null, left: number | null }>({ top: null, left: null });
     const [isSegment, setIsSegment] = useState(false);
@@ -85,10 +58,10 @@ export default function Canvas() {
         canvas.on('drop', handleOnDrop);
 
         //panning and zooming
-        canvas.on('mouse:down', handleMouseDown);
-        canvas.on('mouse:move', handleMouseMove);
-        canvas.on('mouse:up', handleMouseUp);
-        canvas.on('mouse:wheel', handleMouseWheel);
+        canvas.on('mouse:down', handleMouseDownPZ);
+        canvas.on('mouse:move', handleMouseMovePZ);
+        canvas.on('mouse:up', handleMouseUpPZ);
+        canvas.on('mouse:wheel', handleMouseWheelPZ);
 
         //undo 
         canvas.on('object:modified', saveState);
@@ -101,10 +74,10 @@ export default function Canvas() {
         canvas.off('selection:cleared', hideMenu);
         canvas.off('dragover', handleDragOver);
         canvas.off('drop', handleOnDrop);
-        canvas.off('mouse:down', handleMouseDown);
-        canvas.off('mouse:move', handleMouseMove);
-        canvas.off('mouse:up', handleMouseUp);
-        canvas.off('mouse:wheel', handleMouseWheel);
+        canvas.off('mouse:down', handleMouseDownPZ);
+        canvas.off('mouse:move', handleMouseMovePZ);
+        canvas.off('mouse:up', handleMouseUpPZ);
+        canvas.off('mouse:wheel', handleMouseWheelPZ);
         canvas.off('object:modified', saveState);
 
         setMenuPos({ top: null, left: null });
@@ -126,7 +99,6 @@ export default function Canvas() {
         });
         images.current = [];
         usingSlider.current = false;
-        
       }
     }, []);
 
@@ -178,13 +150,20 @@ export default function Canvas() {
         };
     }, []);
 
+    function saveState() {
+        if (stack.current.length > 10) {
+            stack.current.shift();
+        }
+        const canvasState = JSON.stringify(canvasIn.current?.toJSON());
+        stack.current.push(canvasState);
+    }
+
     function hideMenu() {
         setMenuPos({ top: null, left: null });
         setIsSegment(false);
         setIsRmbg(false);
         setIsAddPositivePoint(false);
     }
-
     function updateMenu(opt: fabric.IEvent) {
         function getGlobalCoords(source: fabric.Object): fabric.Point[] {
             const oCoords = source.oCoords!;
@@ -205,18 +184,9 @@ export default function Canvas() {
         setSegmentMenuPos({ top: points[1].y as number, left: points[1].x + 17 as number });
     }
 
-    function saveState() {
-        if (stack.current.length > 10) {
-            stack.current.shift();
-        }
-        const canvasState = JSON.stringify(canvasIn.current?.toJSON());
-        stack.current.push(canvasState);
-    }
-
     const [isAddPositivePoint, setIsAddPositivePoint] = useState(false);
     const isAddPositivePointRef = useRef(isAddPositivePoint);
     isAddPositivePointRef.current = isAddPositivePoint;
-
     function addPoint(opt: fabric.IEvent) {
         const target = opt.target as fabric.Object;
 
@@ -271,29 +241,8 @@ export default function Canvas() {
         }
         setIsAddPositivePoint(false);
     }
-
-    async function encodeDecode(current: ImageObject) {
-        if (current.embed == null) {
-            current.embed = await encode(current, encoderSession);
-        }
-
-        // Get mask
-        const resImage = await decode(current, decoderSession);
-
-        current.points?.dispose();
-        current.points = null;
-        current.pointLabels?.dispose();
-        current.pointLabels = null;
-
-        canvasIn.current?.add(resImage);
-        saveState();
-        canvasIn.current?.setActiveObject(resImage);
-
-        if (current.fabricImage.type === 'activeSelection') {
-            current.embed.dispose();
-        }
-    }
-
+    
+    //drag and drop images
     async function handleOnDrop(this: CustomCanvas, opt: fabric.IEvent) {
         const e = opt.e as DragEvent;
         e.preventDefault();
@@ -316,50 +265,11 @@ export default function Canvas() {
         const dataTransfer = e.dataTransfer as DataTransfer;
         reader.readAsDataURL(dataTransfer.files[0]);
     }
-
     function handleDragOver(opt: fabric.IEvent) {
          opt.e.preventDefault();
      }
 
-    function handleDelete() {
-        const activeObjects = canvasIn.current?.getActiveObjects() as fabric.Object[];
-        canvasIn.current?.remove(...activeObjects);
-        canvasIn.current?.discardActiveObject();
-        activeObjects?.forEach((object) => {
-            deleteFromImagesRef(object);
-        });
-        saveState();
-
-    }
-
-    function handleUngroup() {
-        const activeObject = canvasIn.current?.getActiveObject() as fabric.Group;
-        if (activeObject == null || activeObject.type !== 'group') {
-            return;
-        }
-        deleteFromImagesRef(activeObject);
-        activeObject.toActiveSelection();
-        setMenuPos(menuPos);
-    }
-    
-    function deleteFromImagesRef(object: fabric.Object) {
-        const imageObject = images.current.find((image) => image.fabricImage === object);
-        if (!imageObject) return;
-        if (imageObject.embed) {
-            imageObject.embed.dispose();
-        }
-        if (imageObject.points) {
-            imageObject.points.dispose();
-        }
-        if (imageObject.pointLabels) {
-            imageObject.pointLabels.dispose();
-        }
-        if (imageObject.mask) {
-            imageObject.mask.dispose();
-        }
-        images.current = images.current.filter((image) => image.fabricImage !== object);
-    }
-
+    //menu handlers
     function handleGroup() {
         const activeObject = canvasIn.current?.getActiveObject() as fabric.ActiveSelection;
         if (activeObject == null || activeObject.type !== 'activeSelection') {
@@ -368,8 +278,24 @@ export default function Canvas() {
         activeObject.toGroup();
         setMenuPos(menuPos);
     }
-
-
+    function handleUngroup() {
+        const activeObject = canvasIn.current?.getActiveObject() as fabric.Group;
+        if (activeObject == null || activeObject.type !== 'group') {
+            return;
+        }
+        deleteFromImagesRef(activeObject, images);
+        activeObject.toActiveSelection();
+        setMenuPos(menuPos);
+    }
+    function handleDelete() {
+        const activeObjects = canvasIn.current?.getActiveObjects() as fabric.Object[];
+        canvasIn.current?.remove(...activeObjects);
+        canvasIn.current?.discardActiveObject();
+        activeObjects?.forEach((object) => {
+            deleteFromImagesRef(object, images);
+        });
+        saveState();
+    }
     function handleUndo() {
         if (stack.current.length > 1) {
             stack.current.pop();
@@ -379,11 +305,11 @@ export default function Canvas() {
             });
         }
     }
-    
     function handleIsSegment() {
         setIsSegment((prev) => !prev);
     }
 
+    //rmbg handlers
     async function handleRmbg(){ 
         if (isRmbg) {
             setIsRmbg(false);
@@ -399,7 +325,7 @@ export default function Canvas() {
             }
             let resMask;
             if (currentImage.mask == null) {
-                resMask = await depth(currentImage, depthSession);
+                resMask = await getMaskTensor(currentImage, depthSession);
                 currentImage.mask = resMask;
             } else {
                 resMask = currentImage.mask;
@@ -408,24 +334,6 @@ export default function Canvas() {
             setIsRmbg(true);
         }
     }
-
-    async function getClipImage(image: ImageObject, sliderValue: number) {
-        const res = tf.tidy(() => {
-            const mask = image!.mask as tf.Tensor3D;
-            const max = mask.max().dataSync()[0];
-            const min = mask.min().dataSync()[0];
-            const threshold = (max - min) * sliderValue / 100 + min;
-            const clippedMask = mask.lessEqual(threshold);
-            const clippedMaskInt = clippedMask.cast('int32').mul(255).tile([1, 1, 4]);
-            return tf.image.resizeBilinear(clippedMaskInt as tf.Tensor3D, [image.fabricImage.height as number, image.fabricImage.width as number]).cast('int32');
-        });
-        const maskImageData = new ImageData(await tf.browser.toPixels(res as tf.Tensor3D) as Uint8ClampedArray, image.fabricImage.width as number, image.fabricImage.height as number);
-        res.dispose();
-        // @ts-ignore
-        const mask = new fabric.Image(await createImageBitmap(maskImageData));
-        return mask;
-    }
-    
     const usingSlider = useRef(false);
     async function handleRmbgSlider(e: React.ChangeEvent<HTMLInputElement>) {
         if (!isRmbg) {
@@ -442,7 +350,7 @@ export default function Canvas() {
             if (currentImage == null) {
                 return;
             }
-            const maskImage = await getClipImage(currentImage, parseInt(e.target.value))
+            const maskImage = await getMaskImage(currentImage, parseInt(e.target.value))
             maskImage.set({top: 0, left: 0, originX: 'center', originY: 'center', inverted: true});
             currentImage.fabricImage.clipPath = maskImage;
             currentImage.fabricImage.dirty = true;
@@ -451,6 +359,23 @@ export default function Canvas() {
         usingSlider.current = false;
     }
 
+    //SegmentMenu handlers
+    function handleIsAddPositivePoint() {
+        setIsAddPositivePoint(prev => !prev);
+    }
+    
+    async function handleSegment() {
+        const target = canvasIn.current?.getActiveObject() as fabric.Object;
+        const currentImage = findObjectInImages(target, images) as ImageObject;
+        const resImage =  await getSegment(currentImage, encoderSession, decoderSession);
+        canvasIn.current?.add(resImage);
+        saveState();
+        canvasIn.current?.setActiveObject(resImage);
+
+        setIsSegment(false);
+    }
+
+    //keyboard shortcuts
     function handleKeyDown(e: React.KeyboardEvent) {
         if (e.ctrlKey && e.key === 'z') {
             handleUndo();
@@ -480,23 +405,34 @@ export default function Canvas() {
         }
         return;
     }
-    function handleIsAddPositivePoint() {
-        setIsAddPositivePoint(prev => !prev);
-    }
-    function handleSegment() {
-        const target = canvasIn.current?.getActiveObject() as fabric.Object;
-        const currentImage = findObjectInImages(target, images) as ImageObject;
-        encodeDecode(currentImage);
-        setIsSegment(false);
-    }
+
     return (
         <div onKeyDown={handleKeyDown} tabIndex={0}>
             <div>
                 <canvas id="canvas" ref={canvasRef} /> 
             </div>
             <div> 
-                <Menu top={menuPos.top} left={menuPos.left} isSegment={isSegment} handleIsSegment={handleIsSegment} handleDelete={handleDelete} handleGroup={handleGroup} handleUngroup={handleUngroup} handleRmbg={handleRmbg} isRmbg={isRmbg} handleRmbgSlider={handleRmbgSlider} rmbgSliderValue={rmbgSliderValue}/>
-                <SegmentMenu top={segmentMenuPos.top} left={segmentMenuPos.left} isSegment={isSegment} isAddPositivePoint={isAddPositivePoint} handleIsAddPositivePoint={handleIsAddPositivePoint} handleSegment={handleSegment}/>
+                <Menu 
+                    top={menuPos.top} 
+                    left={menuPos.left} 
+                    isSegment={isSegment} 
+                    handleIsSegment={handleIsSegment} 
+                    handleDelete={handleDelete} 
+                    handleGroup={handleGroup} 
+                    handleUngroup={handleUngroup} 
+                    handleRmbg={handleRmbg} 
+                    isRmbg={isRmbg} 
+                    handleRmbgSlider={handleRmbgSlider} 
+                    rmbgSliderValue={rmbgSliderValue}
+                />
+                <SegmentMenu 
+                    top={segmentMenuPos.top} 
+                    left={segmentMenuPos.left} 
+                    isSegment={isSegment} 
+                    isAddPositivePoint={isAddPositivePoint} 
+                    handleIsAddPositivePoint={handleIsAddPositivePoint} 
+                    handleSegment={handleSegment}
+                />
                 <UndoButton handleUndo={handleUndo}/>
             </div>
         </div>

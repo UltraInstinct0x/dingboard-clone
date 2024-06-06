@@ -2,7 +2,7 @@ import * as tf from '@tensorflow/tfjs';
 import { CustomCanvas, ImageObject } from './interfaces';
 import { fabric } from 'fabric';
 
-function handleMouseDown(this: CustomCanvas, opt: fabric.IEvent) {
+function handleMouseDownPZ(this: CustomCanvas, opt: fabric.IEvent) {
   const evt = opt.e as MouseEvent;
   if (evt.metaKey === true) {
     this.isDragging = true;
@@ -11,7 +11,7 @@ function handleMouseDown(this: CustomCanvas, opt: fabric.IEvent) {
     this.lastPosY = evt.clientY;
   }
 }
-function handleMouseMove(this: CustomCanvas, opt: fabric.IEvent) {
+function handleMouseMovePZ(this: CustomCanvas, opt: fabric.IEvent) {
     if (this.isDragging) {
         const e = opt.e as MouseEvent;
         const vpt = this.viewportTransform;
@@ -24,7 +24,7 @@ function handleMouseMove(this: CustomCanvas, opt: fabric.IEvent) {
         this.lastPosY = e.clientY;
     }
 }
-function handleMouseUp(this: CustomCanvas) {
+function handleMouseUpPZ(this: CustomCanvas) {
     this.isDragging = false;
     this.selection = true;
   // on mouse up we want to recalculate new interaction
@@ -34,7 +34,7 @@ function handleMouseUp(this: CustomCanvas) {
     this.isDragging = false;
     this.selection = true;
 }
-function handleMouseWheel(this: CustomCanvas, opt: fabric.IEvent) {
+function handleMouseWheelPZ(this: CustomCanvas, opt: fabric.IEvent) {
   const e = opt.e as WheelEvent;
   const delta = e.deltaY;
   let zoom = this.getZoom();
@@ -45,6 +45,7 @@ function handleMouseWheel(this: CustomCanvas, opt: fabric.IEvent) {
   e.preventDefault();
   e.stopPropagation();
 }
+
 function findBoundingBox(tensor: tf.Tensor3D) {
     const [height, width, _] = tensor.shape;
     return tf.tidy(() => {  
@@ -80,8 +81,8 @@ function findBoundingBox(tensor: tf.Tensor3D) {
         }
         return boundingBox;
     });
-
 }
+
 function findObjectInImages(target: fabric.Object, images: React.MutableRefObject<ImageObject[] | null>): ImageObject|null {
     let currentImage = null;
     if (target.type === 'activeSelection') {
@@ -97,4 +98,41 @@ function findObjectInImages(target: fabric.Object, images: React.MutableRefObjec
     return currentImage;
 }
 
-export { handleMouseDown, handleMouseMove, handleMouseUp, handleMouseWheel, findBoundingBox, findObjectInImages };
+async function getMaskImage(image: ImageObject, sliderValue: number): Promise<fabric.Image> {
+    const res = tf.tidy(() => {
+        const mask = image!.mask as tf.Tensor3D;
+        const max = mask.max().dataSync()[0];
+        const min = mask.min().dataSync()[0];
+        const threshold = (max - min) * sliderValue / 100 + min;
+        const clippedMask = mask.lessEqual(threshold);
+        const clippedMaskInt = clippedMask.cast('int32').mul(255).tile([1, 1, 4]);
+        return tf.image.resizeBilinear(clippedMaskInt as tf.Tensor3D, [image.fabricImage.height as number, image.fabricImage.width as number]).cast('int32');
+    });
+    const maskImageData = new ImageData(await tf.browser.toPixels(res as tf.Tensor3D) as Uint8ClampedArray, image.fabricImage.width as number, image.fabricImage.height as number);
+    res.dispose();
+    // @ts-ignore
+    const mask = new fabric.Image(await createImageBitmap(maskImageData));
+    return mask;
+}
+
+function deleteFromImagesRef(object: fabric.Object, images: React.MutableRefObject<ImageObject[] | null>) {
+    if (images.current === null) throw new Error("Deleting from null imagesRef");
+
+    const imageObject = images.current.find((image) => image.fabricImage === object);
+    if (!imageObject) return;
+    if (imageObject.embed) {
+        imageObject.embed.dispose();
+    }
+    if (imageObject.points) {
+        imageObject.points.dispose();
+    }
+    if (imageObject.pointLabels) {
+        imageObject.pointLabels.dispose();
+    }
+    if (imageObject.mask) {
+        imageObject.mask.dispose();
+    }
+    images.current = images.current.filter((image) => image.fabricImage !== object);
+}
+
+export { handleMouseDownPZ, handleMouseMovePZ, handleMouseUpPZ, handleMouseWheelPZ, findBoundingBox, findObjectInImages, getMaskImage, deleteFromImagesRef };
