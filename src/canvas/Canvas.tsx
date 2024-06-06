@@ -49,6 +49,8 @@ export default function Canvas() {
         canvas.setDimensions({ width: window.innerWidth, height: window.innerHeight });
 
         fabric.Object.prototype.on('moving', updateMenu);
+        fabric.Object.prototype.on('scaling', updateMenu);
+        fabric.Object.prototype.on('rotating', updateMenu);
         canvas.on('selection:created', updateMenu);
         canvas.on('selection:updated', updateMenu);
         canvas.on('selection:cleared', hideMenu);
@@ -69,6 +71,8 @@ export default function Canvas() {
       return () => {
         fabric.Object.prototype.off('mousedown', addPoint);
         fabric.Object.prototype.off('moving', updateMenu);
+        fabric.Object.prototype.off('scaling', updateMenu);
+        fabric.Object.prototype.off('rotating', updateMenu);
         canvas.off('selection:created', updateMenu);
         canvas.off('selection:updated', updateMenu);
         canvas.off('selection:cleared', hideMenu);
