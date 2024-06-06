@@ -6,6 +6,7 @@ interface ImageObject {
     embed: ort.Tensor | null;
     points: tf.Tensor2D | null;
     mask: tf.Tensor3D | null;
+    pointLabels: tf.Tensor1D | null;
 }
 interface CustomCanvas extends fabric.Canvas {
     lastPosX: number;
@@ -19,11 +20,19 @@ interface MenuProps {
     handleGroup: () => void;
     handleUngroup: () => void;
     isSegment: boolean;
-    handleSegment: () => void;
+    handleIsSegment: () => void;
     handleRmbg: () => void;
     isRmbg: boolean;
     handleRmbgSlider: (e: React.ChangeEvent<HTMLInputElement>) => Promise<void>
     rmbgSliderValue: number;
 }
+interface SegmentMenuProps {
+    top: number | null;
+    left: number | null;
+    isSegment: boolean;
+    isAddPositivePoint: boolean;
+    handleIsAddPositivePoint: () => void;
+    handleSegment: () => void;
+}
 
-export type { ImageObject, CustomCanvas, MenuProps };
+export type { ImageObject, CustomCanvas, MenuProps, SegmentMenuProps };

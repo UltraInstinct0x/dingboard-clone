@@ -4,7 +4,7 @@ import { FaRegObjectGroup, FaRegObjectUngroup } from "react-icons/fa";
 import { MenuProps } from "./interfaces";
 import Button from "../common/Button";
 
-export default function Menu({ top, left, handleDelete, handleGroup, handleUngroup, isSegment, handleSegment, handleRmbg, isRmbg, handleRmbgSlider, rmbgSliderValue}: MenuProps) {
+export default function Menu({ top, left, handleDelete, handleGroup, handleUngroup, isSegment, handleIsSegment, handleRmbg, isRmbg, handleRmbgSlider, rmbgSliderValue}: MenuProps) {
     if (top == null || left == null) {
         return null;
     }
@@ -20,7 +20,7 @@ export default function Menu({ top, left, handleDelete, handleGroup, handleUngro
     return (
         <>
             <div className="absolute flex flex-col" style={{top: top, left: left}}>
-                <Button id="segment" Icon={SlPuzzle} isActive={isSegment===true} onClick={handleSegment} shortcut="s" tooltipText={tooltipTexts["segment"]}/>
+                <Button id="segment" Icon={SlPuzzle} isActive={isSegment===true} onClick={handleIsSegment} shortcut="s" tooltipText={tooltipTexts["segment"]}/>
                 <Button id="rmbg" Icon={TbBackground} isActive={isRmbg===true} onClick={handleRmbg} shortcut="r" tooltipText={tooltipTexts["rmbg"]}/>
                 <Button id="delete" Icon={SlTrash}  onClick={handleDelete} shortcut="Backspace" tooltipText={tooltipTexts["delete"]}/>
                 <Button id="group" Icon={FaRegObjectGroup} onClick={handleGroup} shortcut="g" tooltipText={tooltipTexts["group"]}/>

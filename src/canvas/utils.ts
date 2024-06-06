@@ -1,5 +1,6 @@
 import * as tf from '@tensorflow/tfjs';
-import { CustomCanvas } from './interfaces';
+import { CustomCanvas, ImageObject } from './interfaces';
+import { fabric } from 'fabric';
 
 function handleMouseDown(this: CustomCanvas, opt: fabric.IEvent) {
   const evt = opt.e as MouseEvent;
@@ -45,42 +46,55 @@ function handleMouseWheel(this: CustomCanvas, opt: fabric.IEvent) {
   e.stopPropagation();
 }
 function findBoundingBox(tensor: tf.Tensor3D) {
-        const [height, width, _] = tensor.shape;
-        return tf.tidy(() => {  
-            const mask = tensor.slice([0,0,3]);
-            const opaqueMask = mask.greater(tf.scalar(0));
-            const rowMaskArray = opaqueMask.any(1).arraySync() as number[][];
-            const colMaskArray = opaqueMask.any(0).arraySync() as number[][];
+    const [height, width, _] = tensor.shape;
+    return tf.tidy(() => {  
+        const mask = tensor.slice([0,0,3]);
+        const opaqueMask = mask.greater(tf.scalar(0));
+        const rowMaskArray = opaqueMask.any(1).arraySync() as number[][];
+        const colMaskArray = opaqueMask.any(0).arraySync() as number[][];
 
-            const boundingBox = {minX: 0, minY: 0, maxX: 0, maxY: 0};
-            for (let i=0;i<height;i++) {
-                if (rowMaskArray[i][0]) {
-                    boundingBox.minY = i;
-                    break;
-                }
+        const boundingBox = {minX: 0, minY: 0, maxX: 0, maxY: 0};
+        for (let i=0;i<height;i++) {
+            if (rowMaskArray[i][0]) {
+                boundingBox.minY = i;
+                break;
             }
-            for (let i=height-1;i>=0;i--) {
-                if (rowMaskArray[i][0]) {
-                    boundingBox.maxY = i;
-                    break;
-                }
+        }
+        for (let i=height-1;i>=0;i--) {
+            if (rowMaskArray[i][0]) {
+                boundingBox.maxY = i;
+                break;
             }
-            for (let i=0;i<width;i++) {
-                if (colMaskArray[i][0]) {
-                    boundingBox.minX = i;
-                    break;
-                }
+        }
+        for (let i=0;i<width;i++) {
+            if (colMaskArray[i][0]) {
+                boundingBox.minX = i;
+                break;
             }
-            for (let i=width-1;i>=0;i--) {
-                if (colMaskArray[i][0]) {
-                    boundingBox.maxX = i;
-                    break;
-                }
+        }
+        for (let i=width-1;i>=0;i--) {
+            if (colMaskArray[i][0]) {
+                boundingBox.maxX = i;
+                break;
             }
-            return boundingBox;
-        });
+        }
+        return boundingBox;
+    });
 
+}
+function findObjectInImages(target: fabric.Object, images: React.MutableRefObject<ImageObject[] | null>): ImageObject|null {
+    let currentImage = null;
+    if (target.type === 'activeSelection') {
+        const newImage = new fabric.Image(target.toCanvasElement()).set({top: target.top, left: target.left});
+        currentImage = { fabricImage: newImage as fabric.Image, embed: null, points: null, mask: null, pointLabels: null};
+    } else if (target.type === 'group' || target.type === 'image') {
+        currentImage = images.current?.find((image) => image.fabricImage === target);
+        if (currentImage == null) {
+            currentImage = { fabricImage: target as fabric.Image | fabric.Group, embed: null, points: null, mask: null, pointLabels: null};
+            images.current?.push(currentImage);
+        }
     }
+    return currentImage;
+}
 
-
-export { handleMouseDown, handleMouseMove, handleMouseUp, handleMouseWheel, findBoundingBox };
+export { handleMouseDown, handleMouseMove, handleMouseUp, handleMouseWheel, findBoundingBox, findObjectInImages };

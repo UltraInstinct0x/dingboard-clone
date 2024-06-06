@@ -5,8 +5,9 @@ import { fabric } from 'fabric';
 import Menu from './Menu';
 import { encode, decode, loadModel, depth } from './models';
 import { ImageObject, CustomCanvas } from './interfaces';
-import { handleMouseDown, handleMouseMove, handleMouseUp, handleMouseWheel} from './utils';
+import { handleMouseDown, handleMouseMove, handleMouseUp, handleMouseWheel, findObjectInImages} from './utils';
 import UndoButton from './UndoButton';
+import SegmentMenu from './SegmentMenu';
 
 const useFabric = (canvas: React.MutableRefObject<fabric.Canvas | null>, stack: React.MutableRefObject<String[]>) => {
     const fabricRef = useCallback((element: HTMLCanvasElement | null) => {
@@ -58,15 +59,18 @@ export default function Canvas() {
     const depthSession = useRef<ort.InferenceSession | null>(null);
 
     const [menuPos, setMenuPos] = useState<{ top: number | null, left: number | null }>({ top: null, left: null});
-    const [isSegment, setIsSegment] = useState(false);
+
     const [isRmbg, setIsRmbg] = useState(false);
     const [rmbgSliderValue, setRmbgSliderValue] = useState(0);
+
+    const [segmentMenuPos, setSegmentMenuPos] = useState<{ top: number | null, left: number | null }>({ top: null, left: null });
+    const [isSegment, setIsSegment] = useState(false);
     const isSegmentRef = useRef(isSegment);
     isSegmentRef.current = isSegment;
 
     useEffect(() => {
         //segmentation
-        fabric.Object.prototype.on('mousedown', segment);
+        fabric.Object.prototype.on('mousedown', addPoint);
 
         const canvas = canvasIn.current as CustomCanvas;
         canvas.setDimensions({ width: window.innerWidth, height: window.innerHeight });
@@ -90,7 +94,7 @@ export default function Canvas() {
         canvas.on('object:modified', saveState);
 
       return () => {
-        fabric.Object.prototype.off('mousedown', segment);
+        fabric.Object.prototype.off('mousedown', addPoint);
         fabric.Object.prototype.off('moving', updateMenu);
         canvas.off('selection:created', updateMenu);
         canvas.off('selection:updated', updateMenu);
@@ -115,6 +119,9 @@ export default function Canvas() {
             }
             if (image.mask) {
                 image.mask.dispose();
+            }
+            if (image.pointLabels) {
+                image.pointLabels.dispose();
             }
         });
         images.current = [];
@@ -175,25 +182,27 @@ export default function Canvas() {
         setMenuPos({ top: null, left: null });
         setIsSegment(false);
         setIsRmbg(false);
-
+        setIsAddPositivePoint(false);
     }
 
     function updateMenu(opt: fabric.IEvent) {
-        function getGlobalCoords(source: fabric.Object): fabric.Point {
-            const mCanvas = source.canvas?.viewportTransform as number[];
-            const point = new fabric.Point(source.left as number, source.top as number);
-            return fabric.util.transformPoint(point, mCanvas);
+        function getGlobalCoords(source: fabric.Object): fabric.Point[] {
+            const oCoords = source.oCoords!;
+            const pointTL = new fabric.Point(oCoords.tl.x, oCoords.tl.y);
+            const pointTR = new fabric.Point(oCoords.tr.x, oCoords.tr.y);
+            return [pointTL, pointTR];
         }
         //finding the target image
-        let point;
+        let points;
         if (opt.transform) { //moving
-            point = getGlobalCoords(opt.transform.target);
+            points = getGlobalCoords(opt.transform.target);
         } else if (opt.selected![0].group) { // selecting a group
-            point = getGlobalCoords(opt.selected![0].group);
+            points = getGlobalCoords(opt.selected![0].group);
         } else { //selecting an image
-            point = getGlobalCoords(opt.selected![0]);
+            points = getGlobalCoords(opt.selected![0]);
         }
-        setMenuPos({ top: point.y as number , left: point.x - 50 as number });
+        setMenuPos({ top: points[0].y as number , left: points[0].x - 50 as number });
+        setSegmentMenuPos({ top: points[1].y as number, left: points[1].x + 17 as number });
     }
 
     function saveState() {
@@ -204,60 +213,63 @@ export default function Canvas() {
         stack.current.push(canvasState);
     }
 
-    function segment(opt: fabric.IEvent) {
-        let currentImage;
+    const [isAddPositivePoint, setIsAddPositivePoint] = useState(false);
+    const isAddPositivePointRef = useRef(isAddPositivePoint);
+    isAddPositivePointRef.current = isAddPositivePoint;
+
+    function addPoint(opt: fabric.IEvent) {
         const target = opt.target as fabric.Object;
 
-        if (target == null || !isSegmentRef.current) {
-            return;
+        if (target == null || !isAddPositivePointRef.current) return;
+        
+        const currentImage = findObjectInImages(target, images);
+        
+        if (!currentImage) return;
+
+        //scale the point to the image's local coords then to 1024x1024
+        const mCanvas = canvasIn.current?.viewportTransform as number[];
+        const mImage = currentImage.fabricImage.calcTransformMatrix();
+        const mTotal = fabric.util.multiplyTransformMatrices(mCanvas, mImage);
+        const pointer = opt.pointer as fabric.Point;
+        const point = new fabric.Point(pointer.x, pointer.y);
+        const mPoint = fabric.util.transformPoint(point, fabric.util.invertTransform(mTotal));
+        const currentImageHeight = currentImage.fabricImage.height as number;
+        const currentImageWidth = currentImage.fabricImage.width as number;
+        const x = mPoint.x + currentImageWidth / 2;
+        const y = mPoint.y + currentImageHeight / 2;
+
+        const targetWidth = 1024;
+        const targetHeight = 1024;
+        const width = target.width as number;
+        const height = target.height as number;
+        const scaleX = targetWidth / width;
+        const scaleY = targetHeight / height;
+        const newX = x * scaleX;
+        const newY = y * scaleY;
+
+        if (currentImage.points == null) {
+            currentImage.points = tf.tensor([[newX, newY]], [1, 2], 'float32') as tf.Tensor2D;
+            
+        } else {
+            currentImage.points = tf.tidy(() => {
+             return tf.concat([currentImage.points!, tf.tensor([[newX, newY]], [1, 2], 'float32')], 0) as tf.Tensor2D;
+            });
         }
 
-        if (target.type === 'activeSelection') {
-            const newImage = new fabric.Image(target.toCanvasElement()).set({top: target.top, left: target.left});
-            currentImage = { fabricImage: newImage as fabric.Image, embed: null, points: null, mask: null };
-        } else if (target.type === 'group' || target.type === 'image') {
-            currentImage = images.current.find((image) => image.fabricImage === target);
-            if (currentImage == null) {
-                currentImage = { fabricImage: target as fabric.Image | fabric.Group, embed: null, points: null, mask: null};
-                images.current.push(currentImage);
-            }
+        if (currentImage.pointLabels == null) {
+            currentImage.pointLabels = tf.ones([1], 'float32');
+        } else {
+            currentImage.pointLabels = tf.tidy(() => {
+                let temp: tf.Tensor1D;
+                if (isAddPositivePointRef.current) {
+                    temp = tf.ones([1], 'float32') as tf.Tensor1D;
+                } else {
+                    throw new Error("setting pointlabel when not adding any point");
+                }
+                return tf.concat([currentImage.pointLabels!, temp]) as tf.Tensor1D;
+            });
         }
-
-        if (isSegmentRef.current && currentImage) {
-            console.log('segmenting');
-            //scale the point to the image's local coords then to 1024x1024
-            const mCanvas = canvasIn.current?.viewportTransform as number[];
-            const mImage = currentImage.fabricImage.calcTransformMatrix();
-            const mTotal = fabric.util.multiplyTransformMatrices(mCanvas, mImage);
-            const pointer = opt.pointer as fabric.Point;
-            const point = new fabric.Point(pointer.x, pointer.y);
-            const mPoint = fabric.util.transformPoint(point, fabric.util.invertTransform(mTotal));
-            const currentImageHeight = currentImage.fabricImage.height as number;
-            const currentImageWidth = currentImage.fabricImage.width as number;
-            const x = mPoint.x + currentImageWidth / 2;
-            const y = mPoint.y + currentImageHeight / 2;
-
-            const targetWidth = 1024;
-            const targetHeight = 1024;
-            const target = opt.target as fabric.Image;
-            const width = target.width as number;
-            const height = target.height as number;
-            const scaleX = targetWidth / width;
-            const scaleY = targetHeight / height;
-            const newX = x * scaleX;
-            const newY = y * scaleY;
-
-            if (currentImage.points == null) {
-                currentImage.points = tf.tensor([[newX, newY]], [1, 2], 'float32') as tf.Tensor2D;
-            } else {
-                const oldPoints = currentImage.points;
-                currentImage.points = tf.concat([currentImage.points, tf.tensor([[newX, newY]], [1, 2], 'float32')], 0) as tf.Tensor2D;
-                oldPoints.dispose();
-
-            }
-            encodeDecode(currentImage);
-            setIsSegment(false);
-        }
+        setIsAddPositivePoint(false);
     }
 
     async function encodeDecode(current: ImageObject) {
@@ -270,6 +282,8 @@ export default function Canvas() {
 
         current.points?.dispose();
         current.points = null;
+        current.pointLabels?.dispose();
+        current.pointLabels = null;
 
         canvasIn.current?.add(resImage);
         saveState();
@@ -330,10 +344,20 @@ export default function Canvas() {
     
     function deleteFromImagesRef(object: fabric.Object) {
         const imageObject = images.current.find((image) => image.fabricImage === object);
-        if (imageObject && imageObject.embed) {
+        if (!imageObject) return;
+        if (imageObject.embed) {
             imageObject.embed.dispose();
-            images.current = images.current.filter((image) => image.fabricImage !== object);
         }
+        if (imageObject.points) {
+            imageObject.points.dispose();
+        }
+        if (imageObject.pointLabels) {
+            imageObject.pointLabels.dispose();
+        }
+        if (imageObject.mask) {
+            imageObject.mask.dispose();
+        }
+        images.current = images.current.filter((image) => image.fabricImage !== object);
     }
 
     function handleGroup() {
@@ -356,7 +380,7 @@ export default function Canvas() {
         }
     }
     
-    function handleSegment() {
+    function handleIsSegment() {
         setIsSegment((prev) => !prev);
     }
 
@@ -370,7 +394,7 @@ export default function Canvas() {
         if (current?.type == 'image' || current?.type == 'group') {
             let currentImage = images.current.find((image) => image.fabricImage === current);
             if (currentImage == null) {
-                currentImage = { fabricImage: current as fabric.Image | fabric.Group, embed: null, points: null, mask: null};
+                currentImage = { fabricImage: current as fabric.Image | fabric.Group, embed: null, points: null, mask: null, pointLabels: null};
                 images.current.push(currentImage);
             }
             let resMask;
@@ -435,7 +459,7 @@ export default function Canvas() {
             if (e.ctrlKey) {
                 saveState();
             } else {
-                handleSegment();
+                handleIsSegment();
             }
         }
         else if (e.key === 'r') {
@@ -449,17 +473,30 @@ export default function Canvas() {
         }
         else if (e.key === 'u') {
             handleUngroup();
+        } else if (e.key === 'p') {
+            handleIsAddPositivePoint();
+        } else if (e.key === 'Enter') {
+            handleSegment();
         }
         return;
     }
-
+    function handleIsAddPositivePoint() {
+        setIsAddPositivePoint(prev => !prev);
+    }
+    function handleSegment() {
+        const target = canvasIn.current?.getActiveObject() as fabric.Object;
+        const currentImage = findObjectInImages(target, images) as ImageObject;
+        encodeDecode(currentImage);
+        setIsSegment(false);
+    }
     return (
         <div onKeyDown={handleKeyDown} tabIndex={0}>
             <div>
                 <canvas id="canvas" ref={canvasRef} /> 
             </div>
             <div> 
-                <Menu top={menuPos.top} left={menuPos.left} isSegment={isSegment} handleSegment={handleSegment} handleDelete={handleDelete} handleGroup={handleGroup} handleUngroup={handleUngroup} handleRmbg={handleRmbg} isRmbg={isRmbg} handleRmbgSlider={handleRmbgSlider} rmbgSliderValue={rmbgSliderValue}/>
+                <Menu top={menuPos.top} left={menuPos.left} isSegment={isSegment} handleIsSegment={handleIsSegment} handleDelete={handleDelete} handleGroup={handleGroup} handleUngroup={handleUngroup} handleRmbg={handleRmbg} isRmbg={isRmbg} handleRmbgSlider={handleRmbgSlider} rmbgSliderValue={rmbgSliderValue}/>
+                <SegmentMenu top={segmentMenuPos.top} left={segmentMenuPos.left} isSegment={isSegment} isAddPositivePoint={isAddPositivePoint} handleIsAddPositivePoint={handleIsAddPositivePoint} handleSegment={handleSegment}/>
                 <UndoButton handleUndo={handleUndo}/>
             </div>
         </div>
