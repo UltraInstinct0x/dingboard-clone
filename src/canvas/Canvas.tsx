@@ -5,7 +5,7 @@ import { fabric } from 'fabric';
 import Menu from './Menu';
 import { getSegment, loadModel, getMaskTensor } from './models';
 import { ImageObject, CustomCanvas } from './interfaces';
-import { handleMouseDownPZ, handleMouseMovePZ, handleMouseUpPZ, handleMouseWheelPZ, findObjectInImages, getMaskImage, deleteFromImagesRef, followImage} from './utils';
+import { handleMouseDownPZ, handleMouseMovePZ, handleMouseUpPZ, handleMouseWheelPZ, findObjectInImages, getMaskImage, deleteFromImagesRef, followImage } from './utils';
 import UndoButton from './UndoButton';
 import SegmentMenu from './SegmentMenu';
 import { useFabric } from './customHooks';
@@ -87,7 +87,7 @@ export default function Canvas() {
         setMenuPos({ top: null, left: null });
         setIsSegment(false);
         setIsRmbg(false);
-        images.current.forEach((image) => {
+        images.current.forEach(image => {
             if (image.embed) {
                 image.embed.dispose();
             }
@@ -100,6 +100,7 @@ export default function Canvas() {
             if (image.pointLabels) {
                 image.pointLabels.dispose();
             }
+            canvasIn.current?.remove(...image.pointObjects);
         });
         images.current = [];
         usingSlider.current = false;
@@ -167,6 +168,14 @@ export default function Canvas() {
         setIsSegment(false);
         setIsRmbg(false);
         setIsAddPositivePoint(false);
+        setIsAddNegativePoint(false);
+        images.current.forEach(image =>{
+            if (image.points) image.points.dispose();
+            if (image.pointLabels) image.pointLabels.dispose();
+            image.points = null;
+            image.pointLabels = null;
+            canvasIn.current?.remove(...image.pointObjects);
+        });
     }
     function updateMenu(opt: fabric.IEvent) {
         function getGlobalCoords(source: fabric.Object): fabric.Point[] {
@@ -321,10 +330,29 @@ export default function Canvas() {
         setIsAddNegativePoint(prev => !prev);
         setIsAddPositivePoint(false);
     }
+    async function handleSegment() {
+        setIsAddPositivePoint(false);
+        setIsAddNegativePoint(false);
+        setIsSegment(false);
+
+        const target = canvasIn.current?.getActiveObject() as fabric.Object;
+        const currentImage = findObjectInImages(target, images);
+        const resImage =  await getSegment(currentImage, encoderSession, decoderSession);
+
+        
+        canvasIn.current?.remove(...currentImage.pointObjects);
+        canvasIn.current?.add(resImage);
+        saveState();
+        canvasIn.current?.setActiveObject(resImage);
+
+        currentImage.points?.dispose();
+        currentImage.points = null;
+        currentImage.pointLabels?.dispose();
+        currentImage.pointLabels = null;
+
+    }
     function addPoint(opt: fabric.IEvent) {
         const target = opt.target as fabric.Object;
-        console.log(isAddNegativePointRef.current);
-
         if (target == null || (!isAddPositivePointRef.current && !isAddNegativePointRef.current)) return;
         
         const currentImage = findObjectInImages(target, images);
@@ -384,7 +412,7 @@ export default function Canvas() {
         } else {
             color = 'black';
         }
-        const newPoint = new fabric.Circle({ radius: 5, fill: color, originX: 'center', originY: 'center', left: pointer.x, top: pointer.y});
+        const newPoint = new fabric.Circle({ radius: 5, fill: color, originX: 'center', originY: 'center', left: pointer.x, top: pointer.y });
         const transform = fabric.util.multiplyTransformMatrices(fabric.util.invertTransform(currentImage.fabricImage.calcTransformMatrix()), newPoint.calcTransformMatrix());
         currentImage.fabricImage.on('moving', followImage.bind(null, newPoint, currentImage.fabricImage, transform));
         currentImage.fabricImage.on('scaling', followImage.bind(null, newPoint, currentImage.fabricImage, transform));
@@ -394,19 +422,6 @@ export default function Canvas() {
 
         setIsAddPositivePoint(false);
         setIsAddNegativePoint(false);
-    }
-
-    
-    async function handleSegment() {
-        const target = canvasIn.current?.getActiveObject() as fabric.Object;
-        const currentImage = findObjectInImages(target, images);
-        const resImage =  await getSegment(currentImage, encoderSession, decoderSession);
-        canvasIn.current?.remove(...currentImage.pointObjects);
-        canvasIn.current?.add(resImage);
-        saveState();
-        canvasIn.current?.setActiveObject(resImage);
-
-        setIsSegment(false);
     }
 
     //keyboard shortcuts
