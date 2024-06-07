@@ -188,78 +188,7 @@ export default function Canvas() {
         setSegmentMenuPos({ top: points[1].y as number, left: points[1].x + 17 as number });
     }
 
-    const [isAddPositivePoint, setIsAddPositivePoint] = useState(false);
-    const isAddPositivePointRef = useRef(isAddPositivePoint);
-    isAddPositivePointRef.current = isAddPositivePoint;
-    function addPoint(opt: fabric.IEvent) {
-        const target = opt.target as fabric.Object;
-
-        if (target == null || !isAddPositivePointRef.current) return;
         
-        const currentImage = findObjectInImages(target, images);
-        
-        if (!currentImage) return;
-
-        //scale the point to the image's local coords then to 1024x1024
-        const mCanvas = canvasIn.current?.viewportTransform as number[];
-        const mImage = currentImage.fabricImage.calcTransformMatrix();
-        const mTotal = fabric.util.multiplyTransformMatrices(mCanvas, mImage);
-        const pointer = opt.pointer as fabric.Point;
-        const point = new fabric.Point(pointer.x, pointer.y);
-        const mPoint = fabric.util.transformPoint(point, fabric.util.invertTransform(mTotal));
-        const currentImageHeight = currentImage.fabricImage.height as number;
-        const currentImageWidth = currentImage.fabricImage.width as number;
-        const x = mPoint.x + currentImageWidth / 2;
-        const y = mPoint.y + currentImageHeight / 2;
-
-        const targetWidth = 1024;
-        const targetHeight = 1024;
-        const width = target.width as number;
-        const height = target.height as number;
-        const scaleX = targetWidth / width;
-        const scaleY = targetHeight / height;
-        const newX = x * scaleX;
-        const newY = y * scaleY;
-
-        if (currentImage.points == null) {
-            currentImage.points = tf.tensor([[newX, newY]], [1, 2], 'float32') as tf.Tensor2D;
-        } else {
-            currentImage.points = tf.tidy(() => {
-             return tf.concat([currentImage.points!, tf.tensor([[newX, newY]], [1, 2], 'float32')], 0) as tf.Tensor2D;
-            });
-        }
-
-        if (currentImage.pointLabels == null) {
-            currentImage.pointLabels = tf.ones([1], 'float32');
-        } else {
-            currentImage.pointLabels = tf.tidy(() => {
-                let temp: tf.Tensor1D;
-                if (isAddPositivePointRef.current) {
-                    temp = tf.ones([1], 'float32') as tf.Tensor1D;
-                } else {
-                    throw new Error("setting pointlabel when not adding any point");
-                }
-                return tf.concat([currentImage.pointLabels!, temp]) as tf.Tensor1D;
-            });
-        }
-
-        let color;
-        if (isAddPositivePointRef.current) {
-            color = 'green';
-        } else {
-            color = 'red';
-        }
-        const newPoint = new fabric.Circle({ radius: 5, fill: color, originX: 'center', originY: 'center', left: pointer.x, top: pointer.y});
-        const transform = fabric.util.multiplyTransformMatrices(fabric.util.invertTransform(currentImage.fabricImage.calcTransformMatrix()), newPoint.calcTransformMatrix());
-        currentImage.fabricImage.on('moving', followImage.bind(null, newPoint, currentImage.fabricImage, transform));
-        currentImage.fabricImage.on('scaling', followImage.bind(null, newPoint, currentImage.fabricImage, transform));
-        currentImage.fabricImage.on('rotating', followImage.bind(null, newPoint, currentImage.fabricImage, transform));
-        currentImage.pointObjects.push(newPoint);
-        canvasIn.current?.add(newPoint);
-
-        setIsAddPositivePoint(false);
-    }
-    
     //drag and drop images
     async function handleOnDrop(this: CustomCanvas, opt: fabric.IEvent) {
         const e = opt.e as DragEvent;
@@ -377,9 +306,96 @@ export default function Canvas() {
     }
 
     //SegmentMenu handlers
+    const [isAddPositivePoint, setIsAddPositivePoint] = useState(false);
+    const [isAddNegativePoint, setIsAddNegativePoint] = useState(false);
+    const isAddPositivePointRef = useRef(isAddPositivePoint);
+    isAddPositivePointRef.current = isAddPositivePoint;
+    const isAddNegativePointRef = useRef(isAddNegativePoint);
+    isAddNegativePointRef.current = isAddNegativePoint;
+
     function handleIsAddPositivePoint() {
         setIsAddPositivePoint(prev => !prev);
+        setIsAddNegativePoint(false);
     }
+    function handleIsAddNegativePoint() {
+        setIsAddNegativePoint(prev => !prev);
+        setIsAddPositivePoint(false);
+    }
+    function addPoint(opt: fabric.IEvent) {
+        const target = opt.target as fabric.Object;
+        console.log(isAddNegativePointRef.current);
+
+        if (target == null || (!isAddPositivePointRef.current && !isAddNegativePointRef.current)) return;
+        
+        const currentImage = findObjectInImages(target, images);
+        
+        if (!currentImage) return;
+
+        //scale the point to the image's local coords then to 1024x1024
+        const mCanvas = canvasIn.current?.viewportTransform as number[];
+        const mImage = currentImage.fabricImage.calcTransformMatrix();
+        const mTotal = fabric.util.multiplyTransformMatrices(mCanvas, mImage);
+        const pointer = opt.pointer as fabric.Point;
+        const point = new fabric.Point(pointer.x, pointer.y);
+        const mPoint = fabric.util.transformPoint(point, fabric.util.invertTransform(mTotal));
+        const currentImageHeight = currentImage.fabricImage.height as number;
+        const currentImageWidth = currentImage.fabricImage.width as number;
+        const x = mPoint.x + currentImageWidth / 2;
+        const y = mPoint.y + currentImageHeight / 2;
+
+        const targetWidth = 1024;
+        const targetHeight = 1024;
+        const width = target.width as number;
+        const height = target.height as number;
+        const scaleX = targetWidth / width;
+        const scaleY = targetHeight / height;
+        const newX = x * scaleX;
+        const newY = y * scaleY;
+
+        if (currentImage.points == null) {
+            currentImage.points = tf.tensor([[newX, newY]], [1, 2], 'float32') as tf.Tensor2D;
+        } else {
+            currentImage.points = tf.tidy(() => {
+             return tf.concat([currentImage.points!, tf.tensor([[newX, newY]], [1, 2], 'float32')], 0) as tf.Tensor2D;
+            });
+        }
+
+        if (currentImage.pointLabels == null) {
+            currentImage.pointLabels = tf.ones([1], 'float32');
+        } else {
+            currentImage.pointLabels = tf.tidy(() => {
+                let temp: tf.Tensor1D;
+                if (isAddPositivePointRef.current) {
+                    temp = tf.ones([1], 'float32') as tf.Tensor1D;
+                } else if(isAddNegativePointRef.current) {
+                    temp = tf.tensor([0], [1], 'float32') as tf.Tensor1D;
+                } else {
+                    throw new Error("setting pointLabel when not adding any point");
+                }
+                return tf.concat([currentImage.pointLabels!, temp]) as tf.Tensor1D;
+            });
+        }
+
+        let color;
+        if (isAddPositivePointRef.current) {
+            color = 'green';
+        } else if (isAddNegativePointRef.current) {
+            color = 'red';
+        } else {
+            color = 'black';
+        }
+        const newPoint = new fabric.Circle({ radius: 5, fill: color, originX: 'center', originY: 'center', left: pointer.x, top: pointer.y});
+        const transform = fabric.util.multiplyTransformMatrices(fabric.util.invertTransform(currentImage.fabricImage.calcTransformMatrix()), newPoint.calcTransformMatrix());
+        currentImage.fabricImage.on('moving', followImage.bind(null, newPoint, currentImage.fabricImage, transform));
+        currentImage.fabricImage.on('scaling', followImage.bind(null, newPoint, currentImage.fabricImage, transform));
+        currentImage.fabricImage.on('rotating', followImage.bind(null, newPoint, currentImage.fabricImage, transform));
+        currentImage.pointObjects.push(newPoint);
+        canvasIn.current?.add(newPoint);
+
+        setIsAddPositivePoint(false);
+        setIsAddNegativePoint(false);
+    }
+
     
     async function handleSegment() {
         const target = canvasIn.current?.getActiveObject() as fabric.Object;
@@ -417,7 +433,11 @@ export default function Canvas() {
         else if (e.key === 'u') {
             handleUngroup();
         } else if (e.key === 'p') {
+            if (!isSegment) return;
             handleIsAddPositivePoint();
+        } else if (e.key === 'n') {
+            if (!isSegment) return;
+            handleIsAddNegativePoint();
         } else if (e.key === 'Enter') {
             handleSegment();
         }
@@ -449,6 +469,8 @@ export default function Canvas() {
                     isSegment={isSegment} 
                     isAddPositivePoint={isAddPositivePoint} 
                     handleIsAddPositivePoint={handleIsAddPositivePoint} 
+                    isAddNegativePoint={isAddNegativePoint}
+                    handleIsAddNegativePoint={handleIsAddNegativePoint}
                     handleSegment={handleSegment}
                 />
                 <UndoButton handleUndo={handleUndo}/>

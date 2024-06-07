@@ -33,6 +33,8 @@ interface SegmentMenuProps {
     isSegment: boolean;
     isAddPositivePoint: boolean;
     handleIsAddPositivePoint: () => void;
+    isAddNegativePoint: boolean;
+    handleIsAddNegativePoint: () => void;
     handleSegment: () => void;
 }
 
