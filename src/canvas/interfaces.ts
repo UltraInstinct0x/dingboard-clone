@@ -5,6 +5,7 @@ interface ImageObject {
     fabricImage: fabric.Image | fabric.Group;
     embed: ort.Tensor | null;
     points: tf.Tensor2D | null;
+    pointObjects: fabric.Circle[];
     mask: tf.Tensor3D | null;
     pointLabels: tf.Tensor1D | null;
 }

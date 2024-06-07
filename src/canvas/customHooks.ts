@@ -19,6 +19,7 @@ const useFabric = (canvas: React.MutableRefObject<fabric.Canvas | null>, stack: 
         if (localStorage.getItem('stack')) {
             stack.current = JSON.parse(localStorage.getItem('stack') as string);
         }
+        canvas.current.setZoom(1);
         fabric.Object.prototype.transparentCorners = false;
         fabric.Object.prototype.cornerColor = 'white';
         fabric.Object.prototype.cornerStrokeColor = 'black';

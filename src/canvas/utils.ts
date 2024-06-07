@@ -83,15 +83,15 @@ function findBoundingBox(tensor: tf.Tensor3D) {
     });
 }
 
-function findObjectInImages(target: fabric.Object, images: React.MutableRefObject<ImageObject[] | null>): ImageObject|null {
-    let currentImage = null;
-    if (target.type === 'activeSelection') {
+function findObjectInImages(target: fabric.Object, images: React.MutableRefObject<ImageObject[] | null>): ImageObject {
+    let currentImage;
+    if (target.type == 'activeSelection') {
         const newImage = new fabric.Image(target.toCanvasElement()).set({top: target.top, left: target.left});
-        currentImage = { fabricImage: newImage as fabric.Image, embed: null, points: null, mask: null, pointLabels: null};
-    } else if (target.type === 'group' || target.type === 'image') {
+        currentImage = { fabricImage: newImage as fabric.Image, embed: null, points: null, mask: null, pointLabels: null, pointObjects: []};
+    } else {
         currentImage = images.current?.find((image) => image.fabricImage === target);
         if (currentImage == null) {
-            currentImage = { fabricImage: target as fabric.Image | fabric.Group, embed: null, points: null, mask: null, pointLabels: null};
+            currentImage = { fabricImage: target as fabric.Image | fabric.Group, embed: null, points: null, mask: null, pointLabels: null, pointObjects: []};
             images.current?.push(currentImage);
         }
     }
@@ -135,4 +135,17 @@ function deleteFromImagesRef(object: fabric.Object, images: React.MutableRefObje
     images.current = images.current.filter((image) => image.fabricImage !== object);
 }
 
-export { handleMouseDownPZ, handleMouseMovePZ, handleMouseUpPZ, handleMouseWheelPZ, findBoundingBox, findObjectInImages, getMaskImage, deleteFromImagesRef };
+function followImage(point: fabric.Circle, image: fabric.Image | fabric.Group, transform: number[]) {
+    const newTransform = fabric.util.multiplyTransformMatrices(image.calcTransformMatrix(), transform);
+    const opt = fabric.util.qrDecompose(newTransform);
+    point.setPositionByOrigin(
+        // @ts-ignore
+      { x: opt.translateX, y: opt.translateY },
+      'center',
+      'center'
+    );
+    point.set(opt);
+    point.setCoords();
+}
+
+export { handleMouseDownPZ, handleMouseMovePZ, handleMouseUpPZ, handleMouseWheelPZ, findBoundingBox, findObjectInImages, getMaskImage, deleteFromImagesRef, followImage };

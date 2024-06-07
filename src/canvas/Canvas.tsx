@@ -5,7 +5,7 @@ import { fabric } from 'fabric';
 import Menu from './Menu';
 import { getSegment, loadModel, getMaskTensor } from './models';
 import { ImageObject, CustomCanvas } from './interfaces';
-import { handleMouseDownPZ, handleMouseMovePZ, handleMouseUpPZ, handleMouseWheelPZ, findObjectInImages, getMaskImage, deleteFromImagesRef} from './utils';
+import { handleMouseDownPZ, handleMouseMovePZ, handleMouseUpPZ, handleMouseWheelPZ, findObjectInImages, getMaskImage, deleteFromImagesRef, followImage} from './utils';
 import UndoButton from './UndoButton';
 import SegmentMenu from './SegmentMenu';
 import { useFabric } from './customHooks';
@@ -223,7 +223,6 @@ export default function Canvas() {
 
         if (currentImage.points == null) {
             currentImage.points = tf.tensor([[newX, newY]], [1, 2], 'float32') as tf.Tensor2D;
-            
         } else {
             currentImage.points = tf.tidy(() => {
              return tf.concat([currentImage.points!, tf.tensor([[newX, newY]], [1, 2], 'float32')], 0) as tf.Tensor2D;
@@ -243,6 +242,21 @@ export default function Canvas() {
                 return tf.concat([currentImage.pointLabels!, temp]) as tf.Tensor1D;
             });
         }
+
+        let color;
+        if (isAddPositivePointRef.current) {
+            color = 'green';
+        } else {
+            color = 'red';
+        }
+        const newPoint = new fabric.Circle({ radius: 5, fill: color, originX: 'center', originY: 'center', left: pointer.x, top: pointer.y});
+        const transform = fabric.util.multiplyTransformMatrices(fabric.util.invertTransform(currentImage.fabricImage.calcTransformMatrix()), newPoint.calcTransformMatrix());
+        currentImage.fabricImage.on('moving', followImage.bind(null, newPoint, currentImage.fabricImage, transform));
+        currentImage.fabricImage.on('scaling', followImage.bind(null, newPoint, currentImage.fabricImage, transform));
+        currentImage.fabricImage.on('rotating', followImage.bind(null, newPoint, currentImage.fabricImage, transform));
+        currentImage.pointObjects.push(newPoint);
+        canvasIn.current?.add(newPoint);
+
         setIsAddPositivePoint(false);
     }
     
@@ -320,23 +334,22 @@ export default function Canvas() {
             return;
         }
 
-        const current = canvasIn.current?.getActiveObject();
-        if (current?.type == 'image' || current?.type == 'group') {
-            let currentImage = images.current.find((image) => image.fabricImage === current);
-            if (currentImage == null) {
-                currentImage = { fabricImage: current as fabric.Image | fabric.Group, embed: null, points: null, mask: null, pointLabels: null};
-                images.current.push(currentImage);
-            }
-            let resMask;
-            if (currentImage.mask == null) {
-                resMask = await getMaskTensor(currentImage, depthSession);
-                currentImage.mask = resMask;
-            } else {
-                resMask = currentImage.mask;
-            }
-            setRmbgSliderValue(0);
-            setIsRmbg(true);
+        const current = canvasIn.current?.getActiveObject() as fabric.Object;
+        if (current?.type == 'activeSelection') {
+            console.log("cant rmbg on multiple images, group first");
+            return;
         }
+
+        const currentImage = findObjectInImages(current, images);
+        let resMask;
+        if (currentImage.mask == null) {
+            resMask = await getMaskTensor(currentImage, depthSession);
+            currentImage.mask = resMask;
+        } else {
+            resMask = currentImage.mask;
+        }
+        setRmbgSliderValue(0);
+        setIsRmbg(true);
     }
     const usingSlider = useRef(false);
     async function handleRmbgSlider(e: React.ChangeEvent<HTMLInputElement>) {
@@ -370,8 +383,9 @@ export default function Canvas() {
     
     async function handleSegment() {
         const target = canvasIn.current?.getActiveObject() as fabric.Object;
-        const currentImage = findObjectInImages(target, images) as ImageObject;
+        const currentImage = findObjectInImages(target, images);
         const resImage =  await getSegment(currentImage, encoderSession, decoderSession);
+        canvasIn.current?.remove(...currentImage.pointObjects);
         canvasIn.current?.add(resImage);
         saveState();
         canvasIn.current?.setActiveObject(resImage);
