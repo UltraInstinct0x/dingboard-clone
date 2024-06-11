@@ -425,9 +425,34 @@ export default function Canvas() {
     }
 
     //keyboard shortcuts
-    function handleKeyDown(e: React.KeyboardEvent) {
+    async function handleKeyDown(e: React.KeyboardEvent) {
         if (e.ctrlKey && e.key === 'z') {
             handleUndo();
+        }
+        else if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+            const clipboardItems = await navigator.clipboard.read();
+            for (const clipboardItem of clipboardItems) {
+                if (!(clipboardItem.types.includes('image/png') || clipboardItem.types.includes('image/jpeg'))) continue; 
+                const blob = await clipboardItem.getType('image/png') || await clipboardItem.getType('image/jpeg');
+                const reader = new FileReader();
+                reader.onload = (eventReader: ProgressEvent<FileReader>) => {
+                    const image = new Image();
+                    image.onload = () => {
+                        const imgInstance = new fabric.Image(image);
+                        canvasIn.current?.add(imgInstance);
+                        saveState();
+                    }
+                    const target = eventReader.target as FileReader;
+                    image.src = target.result as string;
+                };
+                reader.readAsDataURL(blob);
+            }
+        }
+        else if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+            const activeObject = canvasIn.current?.getActiveObject();
+            activeObject.toCanvasElement().toBlob( blob =>
+                navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+            );
         }
         else if (e.key === 's') {
             if (e.ctrlKey) {
