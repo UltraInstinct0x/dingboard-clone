@@ -449,10 +449,11 @@ export default function Canvas() {
             }
         }
         else if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
-            const activeObject = canvasIn.current?.getActiveObject();
-            activeObject.toCanvasElement().toBlob( blob =>
+            const activeObject = canvasIn.current?.getActiveObject() as fabric.Object;
+            activeObject.toCanvasElement().toBlob( blob => {
+                if (!blob) return;
                 navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
-            );
+            });
         }
         else if (e.key === 's') {
             if (e.ctrlKey) {
