@@ -4,7 +4,7 @@ import { fabric } from 'fabric';
 
 function handleMouseDownPZ(this: CustomCanvas, opt: fabric.IEvent) {
   const evt = opt.e as MouseEvent;
-  if (evt.metaKey === true) {
+  if (evt.shiftKey || evt.metaKey || evt.ctrlKey || evt.altKey) {
     this.isDragging = true;
     this.selection = false;
     this.lastPosX = evt.clientX;
