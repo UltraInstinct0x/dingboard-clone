@@ -10,12 +10,25 @@ const useFabric = (canvas: React.MutableRefObject<fabric.Canvas | null>, stack: 
             return;
         }
         canvas.current = new fabric.Canvas(element, {backgroundColor: 'Gainsboro', preserveObjectStacking: true});
-        if (localStorage.getItem('canvas')) {
+        // @ts-ignore
+        if (localStorage.getItem('canvas') && localStorage.getItem('canvas')['objects'] && JSON.parse(localStorage.getItem('canvas') as string)['objects'].length > 0) {
             canvas.current?.loadFromJSON(JSON.parse(localStorage.getItem('canvas') as string), () => {
                 canvas.current?.renderAll();
                 console.log('loaded canvas from local storage');
             });
+        } else {
+            const image = new Image();
+            image.onload = () => {
+                const imgInstance = new fabric.Image(image, {
+                    left: 0,
+                    top: 0,
+                });
+                canvas.current?.add(imgInstance);
+            }
+
+            image.src = "images/demo14.png";
         }
+
         if (localStorage.getItem('stack')) {
             stack.current = JSON.parse(localStorage.getItem('stack') as string);
         }
