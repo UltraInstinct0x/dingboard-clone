@@ -13,12 +13,12 @@ export default function Menu({ top, left, handleDelete, handleGroup, handleUngro
     const topSlider = top + 50;
     const leftSlider = left + 50;
     const tooltipTexts = {
-        "segment": "Click this then click on the part that you want to segment.", 
+        "segment": "Click to bring up a menu allowing you to put positive/negative points where you want to segment the image.", 
         "rmbg": "Click then wait until a slider appears that allows you to remove background.",
         "delete": "Delete element/s",
         "group": "Groups elements",
         "ungroup": "Ungroups elements",
-        "crop": "Crop image"
+        "crop": "Crop image, click and drag to select the area you want to keep."
     }
     return (
         <>
