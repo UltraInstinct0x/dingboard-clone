@@ -1,13 +1,15 @@
 import { SlPuzzle, SlTrash } from "react-icons/sl";
 import { TbBackground } from "react-icons/tb";
 import { FaRegObjectGroup, FaRegObjectUngroup } from "react-icons/fa";
+import { FaCropSimple } from "react-icons/fa6";
 import { MenuProps } from "./interfaces";
 import Button from "../common/Button";
 
-export default function Menu({ top, left, handleDelete, handleGroup, handleUngroup, isSegment, handleIsSegment, handleRmbg, isRmbg, handleRmbgSlider, rmbgSliderValue}: MenuProps) {
+export default function Menu({ top, left, handleDelete, handleGroup, handleUngroup, isSegment, handleIsSegment, handleRmbg, isRmbg, handleRmbgSlider, rmbgSliderValue, isCrop, handleIsCrop}: MenuProps) {
     if (top == null || left == null) {
         return null;
     }
+
     const topSlider = top + 50;
     const leftSlider = left + 50;
     const tooltipTexts = {
@@ -16,6 +18,7 @@ export default function Menu({ top, left, handleDelete, handleGroup, handleUngro
         "delete": "Delete element/s",
         "group": "Groups elements",
         "ungroup": "Ungroups elements",
+        "crop": "Crop image"
     }
     return (
         <>
@@ -25,8 +28,8 @@ export default function Menu({ top, left, handleDelete, handleGroup, handleUngro
                 <Button id="delete" Icon={SlTrash}  onClick={handleDelete} shortcut="Backspace" tooltipText={tooltipTexts["delete"]}/>
                 <Button id="group" Icon={FaRegObjectGroup} onClick={handleGroup} shortcut="g" tooltipText={tooltipTexts["group"]}/>
                 <Button id="ungroup" Icon={FaRegObjectUngroup} onClick={handleUngroup} shortcut="u" tooltipText={tooltipTexts["ungroup"]}/>
+                <Button id="crop" Icon={FaCropSimple} isActive={isCrop===true} onClick={handleIsCrop} shortcut="c" tooltipText={tooltipTexts["crop"]}/>
             </div>
-            //slider
             <div className={`${isRmbg ? "visible"  : "invisible"} absolute flex`} style={{top: topSlider, left: leftSlider}}>
                 <input type="range" min="0" max="100" value={rmbgSliderValue} onChange={handleRmbgSlider} />
             </div>

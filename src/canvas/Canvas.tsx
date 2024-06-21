@@ -4,7 +4,7 @@ import * as ort from 'onnxruntime-web/webgpu';
 import { fabric } from 'fabric';
 import Menu from './Menu';
 import { getSegment, loadModel, getMaskTensor } from './models';
-import { ImageObject, CustomCanvas } from './interfaces';
+import { ImageObject, CustomCanvas, CropRect } from './interfaces';
 import { handleMouseDownPZ, handleMouseMovePZ, handleMouseUpPZ, handleMouseWheelPZ, findObjectInImages, getMaskImage, deleteFromImagesRef, followImage } from './utils';
 import UndoButton from './UndoButton';
 import SegmentMenu from './SegmentMenu';
@@ -41,10 +41,25 @@ export default function Canvas() {
     const isSegmentRef = useRef(isSegment);
     isSegmentRef.current = isSegment;
 
+    const [isCrop, setIsCrop] = useState(false);
+    const isCropRef = useRef(isCrop);
+    isCropRef.current = isCrop;
+    // @ts-ignore
+    const cropRectRef = useRef<CropRect>(new fabric.Rect({
+            stroke: '#ccc',
+            strokeDashArray: [2, 2],
+            visible: false,
+            selectable: false,
+            fill:'transparent',
+    }));
+    const isCropMoveRef = useRef(false);
+    const cropTargetRef = useRef<fabric.Object | null>(null);
+
     useEffect(() => {
         //segmentation
         fabric.Object.prototype.on('mousedown', addPoint);
 
+        
         const canvas = canvasIn.current as CustomCanvas;
         canvas.setDimensions({ width: window.innerWidth, height: window.innerHeight });
 
@@ -68,6 +83,12 @@ export default function Canvas() {
         //undo 
         canvas.on('object:modified', saveState);
 
+        //cropping
+        canvas.on('mouse:down', cropImageMouseDown);
+        canvas.on('mouse:move', cropImageMouseMove);
+        canvas.on('mouse:up', cropImageMouseUp);
+        canvas.add(cropRectRef.current);
+
       return () => {
         fabric.Object.prototype.off('mousedown', addPoint);
         fabric.Object.prototype.off('moving', updateMenu);
@@ -83,10 +104,15 @@ export default function Canvas() {
         canvas.off('mouse:up', handleMouseUpPZ);
         canvas.off('mouse:wheel', handleMouseWheelPZ);
         canvas.off('object:modified', saveState);
+        canvas.off('mouse:down', cropImageMouseDown);
+        canvas.off('mouse:move', cropImageMouseMove);
+        canvas.off('mouse:up', cropImageMouseUp);
+        canvas.remove(cropRectRef.current);
 
         setMenuPos({ top: null, left: null });
         setIsSegment(false);
         setIsRmbg(false);
+        setIsCrop(false);
         images.current.forEach(image => {
             if (image.embed) {
                 image.embed.dispose();
@@ -424,6 +450,117 @@ export default function Canvas() {
         setIsAddNegativePoint(false);
     }
 
+    //cropping 
+    function handleIsCrop() {
+        const activeObject = canvasIn.current?.getActiveObject();
+        if (!activeObject) return;
+        cropTargetRef.current = activeObject;
+        setIsCrop(prev => !prev);
+    }
+    function cropImageMouseDown(opt: fabric.IEvent) {
+        if (!isCropRef.current) return;
+
+        const pointer = opt.absolutePointer as fabric.Point;
+        //lock movement
+        const cropTarget = cropTargetRef.current as fabric.Object;
+        cropTarget.set({ lockMovementX: true, lockMovementY: true });
+
+        cropRectRef.current.width = 10;
+        cropRectRef.current.height = 10;
+        cropRectRef.current.left = pointer.x;
+        cropRectRef.current.top = pointer.y;
+        cropRectRef.current.origLeft = pointer.x;
+        cropRectRef.current.origTop = pointer.y;
+        cropRectRef.current.visible = true;
+        canvasIn.current?.bringToFront(cropRectRef.current);
+
+        isCropMoveRef.current = true;
+    }
+    const cropImageMouseMovingRef = useRef(false)
+    function cropImageMouseMove(opt: fabric.IEvent) {
+        if (!isCropMoveRef.current) return;
+        if (cropImageMouseMovingRef.current) return;
+        cropImageMouseMovingRef.current = true;
+
+        const pointer = opt.absolutePointer as fabric.Point;
+
+        const height = pointer.y-cropRectRef.current.origTop;
+        const width = pointer.x-cropRectRef.current.origLeft;
+        
+        if (width > 0 && height > 0) {
+            cropRectRef.current.set({ left: cropRectRef.current.origLeft, top: cropRectRef.current.origTop });
+        } else if (width < 0 && height > 0) {
+            cropRectRef.current.set({ left: pointer.x, top: cropRectRef.current.origTop });
+        }
+        else if (width > 0 && height < 0) {
+            cropRectRef.current.set({ left: cropRectRef.current.origLeft, top: pointer.y });
+        }
+        else {
+            cropRectRef.current.set({ left: pointer.x, top: pointer.y });
+        }
+        cropRectRef.current.width = Math.abs(width);
+        cropRectRef.current.height = Math.abs(height);
+
+        cropRectRef.current.dirty = true;
+        canvasIn.current?.renderAll();
+        cropImageMouseMovingRef.current = false;
+    }
+    function cropImageMouseUp() {
+        if (!isCropMoveRef.current) return;
+        
+        const activeObject = cropTargetRef.current as fabric.Object;
+        activeObject.set({ lockMovementX: false, lockMovementY: false });
+
+        const mImage = activeObject.calcTransformMatrix();
+        const mInverse = fabric.util.invertTransform(mImage);
+        const pointClicked = new fabric.Point(cropRectRef.current.left as number, cropRectRef.current.top as number);
+        const point = fabric.util.transformPoint(pointClicked, mInverse);
+
+        /*
+        if (!activeObject.clipPath) {
+            const clipGroup = new fabric.Group([
+                new fabric.Rect({
+                    left: point.x,
+                    top: point.y,
+                    width: cropRectRef.current.width,
+                    height: cropRectRef.current.height,
+                })]
+            );
+            activeObject.clipPath = clipGroup;
+        } else {
+            console.log('adding clipPath');
+            activeObject.clipPath.addWithUpdate(new fabric.Rect({  
+                left: point.x,
+                top: point.y,
+                width: cropRectRef.current.width,
+                height: cropRectRef.current.height,
+                inverted: true,
+            }));
+        }
+        */
+        const clone = new fabric.Image(activeObject.toCanvasElement());
+        clone.set({
+            left: cropRectRef.current.left,
+            top: cropRectRef.current.top,
+            width: cropRectRef.current.width,
+            height: cropRectRef.current.height,
+            cropX: point.x + activeObject.width! / 2,
+            cropY: point.y + activeObject.height! / 2,
+        });
+        canvasIn.current?.add(clone);
+        canvasIn.current?.bringToFront(clone);
+        saveState();
+        canvasIn.current?.setActiveObject(clone);
+
+        setIsCrop(false);
+        isCropMoveRef.current = false;
+        cropTargetRef.current = null;
+        cropRectRef.current.visible = false;
+
+        activeObject.dirty = true;
+        canvasIn.current?.renderAll();
+    }
+    
     //keyboard shortcuts
     async function handleKeyDown(e: React.KeyboardEvent) {
         if (e.ctrlKey && e.key === 'z') {
@@ -481,6 +618,8 @@ export default function Canvas() {
             handleIsAddNegativePoint();
         } else if (e.key === 'Enter') {
             handleSegment();
+        } else if (e.key === 'c') {
+            handleIsCrop();
         }
         return;
     }
@@ -503,6 +642,8 @@ export default function Canvas() {
                     isRmbg={isRmbg} 
                     handleRmbgSlider={handleRmbgSlider} 
                     rmbgSliderValue={rmbgSliderValue}
+                    isCrop={isCrop}
+                    handleIsCrop={handleIsCrop}
                 />
                 <SegmentMenu 
                     top={segmentMenuPos.top} 

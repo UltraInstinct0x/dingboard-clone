@@ -9,6 +9,12 @@ interface ImageObject {
     mask: tf.Tensor3D | null;
     pointLabels: tf.Tensor1D | null;
 }
+
+interface CropRect extends fabric.Rect {
+    origTop: number;
+    origLeft: number;
+}
+
 interface CustomCanvas extends fabric.Canvas {
     lastPosX: number;
     lastPosY: number;
@@ -26,6 +32,8 @@ interface MenuProps {
     isRmbg: boolean;
     handleRmbgSlider: (e: React.ChangeEvent<HTMLInputElement>) => Promise<void>
     rmbgSliderValue: number;
+    isCrop: boolean;
+    handleIsCrop: () => void;
 }
 interface SegmentMenuProps {
     top: number | null;
@@ -38,4 +46,4 @@ interface SegmentMenuProps {
     handleSegment: () => void;
 }
 
-export type { ImageObject, CustomCanvas, MenuProps, SegmentMenuProps };
+export type { ImageObject, CustomCanvas, MenuProps, SegmentMenuProps, CropRect };
