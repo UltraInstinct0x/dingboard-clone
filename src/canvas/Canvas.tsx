@@ -514,6 +514,7 @@ export default function Canvas() {
         const mImage = activeObject.calcTransformMatrix();
         const mInverse = fabric.util.invertTransform(mImage);
         const pointClicked = new fabric.Point(cropRectRef.current.left as number, cropRectRef.current.top as number);
+        //point is relative to center of image
         const point = fabric.util.transformPoint(pointClicked, mInverse);
 
         /*
@@ -544,8 +545,8 @@ export default function Canvas() {
             top: cropRectRef.current.top,
             width: cropRectRef.current.width,
             height: cropRectRef.current.height,
-            cropX: point.x + activeObject.width! / 2,
-            cropY: point.y + activeObject.height! / 2,
+            cropX: (point.x + activeObject.width! / 2) * activeObject.scaleX!,
+            cropY: (point.y + activeObject.height! / 2) * activeObject.scaleY!,
         });
         canvasIn.current?.add(clone);
         canvasIn.current?.bringToFront(clone);
