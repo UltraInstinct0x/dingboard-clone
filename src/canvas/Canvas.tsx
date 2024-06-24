@@ -593,6 +593,14 @@ export default function Canvas() {
                 navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
             });
         }
+        else if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
+            canvasIn.current?.discardActiveObject();
+            const sel = new fabric.ActiveSelection(canvasIn.current?.getObjects(), {
+                  canvas: canvasIn.current,
+            });
+            canvasIn.current?.setActiveObject(sel);
+            canvasIn.current?.renderAll();
+        }
         else if (e.key === 's') {
             if (e.ctrlKey) {
                 saveState();
