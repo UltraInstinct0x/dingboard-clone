@@ -596,7 +596,7 @@ export default function Canvas() {
         else if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
             canvasIn.current?.discardActiveObject();
             const sel = new fabric.ActiveSelection(canvasIn.current?.getObjects(), {
-                  canvas: canvasIn.current,
+                  canvas: canvasIn.current as fabric.Canvas,
             });
             canvasIn.current?.setActiveObject(sel);
             canvasIn.current?.renderAll();
