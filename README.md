@@ -6,22 +6,12 @@ only tested on chrome
 - image segmentation (use first button, then click on part you want to segment)
   - clientside both encoder + decoder of MobileSAM using ONNX.
   - uses WEBGPU by default, fallback to CPU if not available (slow)
+- depth based background removal
 
 ## TODO
-- inpainting
-- background removal
-- copy/paste images to and from canvas
 - caching the model onnx sessions
-- undo/redo
 - some other shit
-
-## DONE 
-- localstorage of canvas state
-
-## NOTES
-- enable cross-origin isolation for onnx multithreading using vite headers and by using code from [this guy](https://github.com/josephrocca/clip-image-sorter) to enable it for github pages.
 
 sorry its my first time with react, typescript, and frontend things
 
-DRAG&DROP images from your computer only for now
 
