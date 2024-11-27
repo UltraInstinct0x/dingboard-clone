@@ -9,7 +9,6 @@ import { handleMouseDownPZ, handleMouseMovePZ, handleMouseUpPZ, handleMouseWheel
 import UndoButton from './UndoButton';
 import SegmentMenu from './SegmentMenu';
 import { useFabric } from './customHooks';
-import { Toolbar } from "../components/Toolbar";
 
 const depthModelPath = 'models/depth_anything_vits14.onnx';
 const encoderModelPath = 'models/mobile_sam_encoder_no_preprocess.onnx';
@@ -637,14 +636,6 @@ export default function Canvas() {
     return (
         <div onKeyDown={handleKeyDown} tabIndex={0}>
             <div>
-                <Toolbar 
-                    isSegment={isSegment} 
-                    isRmbg={isRmbg} 
-                    isCrop={isCrop} 
-                    handleIsSegment={handleIsSegment} 
-                    handleRmbg={handleRmbg} 
-                    handleIsCrop={handleIsCrop} 
-                />
                 <canvas id="canvas" ref={canvasRef} /> 
             </div>
             <div> 
