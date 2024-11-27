@@ -5,8 +5,8 @@ import { FaCropSimple } from "react-icons/fa6";
 import { MenuProps } from "./interfaces";
 import Button from "../common/Button";
 
-export default function Menu({ top, left, handleDelete, handleGroup, handleUngroup, isSegment, handleIsSegment, handleRmbg, isRmbg, handleRmbgSlider, rmbgSliderValue, isCrop, handleIsCrop}: MenuProps) {
-    if (top == null || left == null) {
+export default function Menu({ top, left, angle, handleDelete, handleGroup, handleUngroup, isSegment, handleIsSegment, handleRmbg, isRmbg, handleRmbgSlider, rmbgSliderValue, isCrop, handleIsCrop}: MenuProps) {
+    if (top == null || left == null || angle == null) {
         return null;
     }
 
@@ -20,9 +20,30 @@ export default function Menu({ top, left, handleDelete, handleGroup, handleUngro
         "ungroup": "Ungroups elements",
         "crop": "Crop image, click and drag to select the area you want to keep."
     }
+
+    const getRelativePosition = (baseTop: number, baseLeft: number) => {
+        const rad = (angle * Math.PI) / 180;
+        const cos = Math.cos(rad);
+        const sin = Math.sin(rad);
+
+        // Apply rotation to the relative position
+        return {
+            top: baseTop,
+            left: baseLeft + (40 * sin), // Adjust horizontal position based on rotation
+            transform: `rotate(${angle}deg)`,
+            transformOrigin: 'top left'
+        };
+    };
+
+    const menuStyle = getRelativePosition(top, left);
+    const sliderStyle = getRelativePosition(topSlider, leftSlider);
+
     return (
         <>
-            <div className="absolute flex flex-col" style={{top: top, left: left}}>
+            <div 
+                className="absolute flex flex-col gap-1" 
+                style={menuStyle}
+            >
                 <Button id="segment" Icon={SlPuzzle} isActive={isSegment===true} onClick={handleIsSegment} shortcut="s" tooltipText={tooltipTexts["segment"]}/>
                 <Button id="rmbg" Icon={TbBackground} isActive={isRmbg===true} onClick={handleRmbg} shortcut="r" tooltipText={tooltipTexts["rmbg"]}/>
                 <Button id="delete" Icon={SlTrash}  onClick={handleDelete} shortcut="Backspace" tooltipText={tooltipTexts["delete"]}/>
@@ -30,7 +51,10 @@ export default function Menu({ top, left, handleDelete, handleGroup, handleUngro
                 <Button id="ungroup" Icon={FaRegObjectUngroup} onClick={handleUngroup} shortcut="u" tooltipText={tooltipTexts["ungroup"]}/>
                 <Button id="crop" Icon={FaCropSimple} isActive={isCrop===true} onClick={handleIsCrop} shortcut="c" tooltipText={tooltipTexts["crop"]}/>
             </div>
-            <div className={`${isRmbg ? "visible"  : "invisible"} absolute flex`} style={{top: topSlider, left: leftSlider}}>
+            <div 
+                className={`${isRmbg ? "visible" : "invisible"} absolute flex`}
+                style={sliderStyle}
+            >
                 <input type="range" min="0" max="100" value={rmbgSliderValue} onChange={handleRmbgSlider} />
             </div>
         </>

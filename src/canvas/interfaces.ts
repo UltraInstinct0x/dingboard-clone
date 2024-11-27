@@ -20,9 +20,11 @@ interface CustomCanvas extends fabric.Canvas {
     lastPosY: number;
     isDragging: boolean;
 }
+
 interface MenuProps {
     top: number | null;
     left: number | null;
+    angle: number | null;
     handleDelete: () => void;
     handleGroup: () => void;
     handleUngroup: () => void;
@@ -30,14 +32,16 @@ interface MenuProps {
     handleIsSegment: () => void;
     handleRmbg: () => void;
     isRmbg: boolean;
-    handleRmbgSlider: (e: React.ChangeEvent<HTMLInputElement>) => Promise<void>
+    handleRmbgSlider: (e: React.ChangeEvent<HTMLInputElement>) => Promise<void>;
     rmbgSliderValue: number;
     isCrop: boolean;
     handleIsCrop: () => void;
 }
+
 interface SegmentMenuProps {
     top: number | null;
     left: number | null;
+    angle: number | null;
     isSegment: boolean;
     isAddPositivePoint: boolean;
     handleIsAddPositivePoint: () => void;

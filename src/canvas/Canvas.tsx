@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from "react";
+import React,{ useRef, useEffect, useState } from "react";
 import * as tf from '@tensorflow/tfjs';
 import * as ort from 'onnxruntime-web/webgpu';
 import { fabric } from 'fabric';
@@ -9,6 +9,9 @@ import { handleMouseDownPZ, handleMouseMovePZ, handleMouseUpPZ, handleMouseWheel
 import UndoButton from './UndoButton';
 import SegmentMenu from './SegmentMenu';
 import { useFabric } from './customHooks';
+import { ContextMenuItem } from '../types';
+import { ContextMenu } from '../components/ContextMenu';
+
 
 const depthModelPath = 'models/depth_anything_vits14.onnx';
 const encoderModelPath = 'models/mobile_sam_encoder_no_preprocess.onnx';
@@ -23,20 +26,20 @@ console.log('numThreads:', ort.env.wasm.numThreads);
 
 export default function Canvas() {
     const canvasIn = useRef<fabric.Canvas | null>(null);
-    const stack = useRef<String[]>([]);
+    const stack = useRef<string[]>([]);
     const canvasRef = useFabric(canvasIn, stack);
     const images = useRef<ImageObject[]>([]);
-
     const encoderSession = useRef<ort.InferenceSession | null>(null);
     const decoderSession = useRef<ort.InferenceSession | null>(null);
     const depthSession = useRef<ort.InferenceSession | null>(null);
+    const [contextMenu, setContextMenu] = React.useState<{ x: number; y: number } | null>(null);
 
     const [isRmbg, setIsRmbg] = useState(false);
     const [rmbgSliderValue, setRmbgSliderValue] = useState(0);
 
-    const [menuPos, setMenuPos] = useState<{ top: number | null, left: number | null }>({ top: null, left: null});
+    const [menuPos, setMenuPos] = useState<{ top: number | null, left: number | null, angle: number | null }>({ top: null, left: null, angle: null });
 
-    const [segmentMenuPos, setSegmentMenuPos] = useState<{ top: number | null, left: number | null }>({ top: null, left: null });
+    const [segmentMenuPos, setSegmentMenuPos] = useState<{ top: number | null, left: number | null, angle: number | null }>({ top: null, left: null, angle: null });
     const [isSegment, setIsSegment] = useState(false);
     const isSegmentRef = useRef(isSegment);
     isSegmentRef.current = isSegment;
@@ -109,7 +112,7 @@ export default function Canvas() {
         canvas.off('mouse:up', cropImageMouseUp);
         canvas.remove(cropRectRef.current);
 
-        setMenuPos({ top: null, left: null });
+        setMenuPos({ top: null, left: null, angle: null });
         setIsSegment(false);
         setIsRmbg(false);
         setIsCrop(false);
@@ -132,6 +135,30 @@ export default function Canvas() {
         usingSlider.current = false;
       }
     }, []);
+
+    useEffect(() => {
+        if (!canvasIn.current) return;
+
+        // Add context menu event listener
+        canvasIn.current.on('mouse:down', (e) => {
+            if (e.button === 3) { // Right click
+                e.e.preventDefault();
+                const pointer = canvasIn.current?.getPointer(e.e);
+                setContextMenu({ x: e.e.clientX, y: e.e.clientY });
+            }
+        });
+
+        // Close context menu on canvas interaction
+        canvasIn.current.on('mouse:down', (e) => {
+            if (e.button !== 3) { // Not right click
+                setContextMenu(null);
+            }
+        });
+
+        return () => {
+            canvasIn.current?.off('mouse:down');
+        };
+    }, [canvasIn.current]);
 
     //save canvas state to local storage
     useEffect(() => {
@@ -181,6 +208,51 @@ export default function Canvas() {
         };
     }, []);
 
+    const contextMenuItems: ContextMenuItem[] = [
+        { 
+            label: 'Cut', 
+            shortcut: '⌘X', 
+            onClick: () => {
+                const activeObject = canvasIn.current?.getActiveObject();
+                if (activeObject) {
+                    // Implement cut functionality
+                    console.log('Cut');
+                }
+            }
+        },
+        { 
+            label: 'Copy', 
+            shortcut: '⌘C', 
+            onClick: () => {
+                const activeObject = canvasIn.current?.getActiveObject();
+                if (activeObject) {
+                    // Implement copy functionality
+                    console.log('Copy');
+                }
+            }
+        },
+        { 
+            label: 'Paste', 
+            shortcut: '⌘V', 
+            onClick: () => {
+                // Implement paste functionality
+                console.log('Paste');
+            }
+        },
+        { 
+            label: 'Delete', 
+            shortcut: '⌫', 
+            onClick: () => {
+                const activeObject = canvasIn.current?.getActiveObject();
+                if (activeObject) {
+                    canvasIn.current?.remove(activeObject);
+                    canvasIn.current?.renderAll();
+                }
+            },
+            isDanger: true 
+        },
+    ];
+
     function saveState() {
         if (stack.current.length > 10) {
             stack.current.shift();
@@ -190,7 +262,7 @@ export default function Canvas() {
     }
 
     function hideMenu() {
-        setMenuPos({ top: null, left: null });
+        setMenuPos({ top: null, left: null, angle: null });
         setIsSegment(false);
         setIsRmbg(false);
         setIsAddPositivePoint(false);
@@ -204,23 +276,36 @@ export default function Canvas() {
         });
     }
     function updateMenu(opt: fabric.IEvent) {
-        function getGlobalCoords(source: fabric.Object): fabric.Point[] {
+        function getGlobalCoords(source: fabric.Object): { points: fabric.Point[], angle: number } {
             const oCoords = source.oCoords!;
             const pointTL = new fabric.Point(oCoords.tl.x, oCoords.tl.y);
             const pointTR = new fabric.Point(oCoords.tr.x, oCoords.tr.y);
-            return [pointTL, pointTR];
+            return {
+                points: [pointTL, pointTR],
+                angle: source.angle || 0
+            };
         }
-        //finding the target image
-        let points;
+
+        let result;
         if (opt.transform) { //moving
-            points = getGlobalCoords(opt.transform.target);
-        } else if (opt.selected![0].group) { // selecting a group
-            points = getGlobalCoords(opt.selected![0].group);
+            result = getGlobalCoords(opt.transform.target);
+        } else if (opt.selected![0].group) { //selecting a group
+            result = getGlobalCoords(opt.selected![0].group);
         } else { //selecting an image
-            points = getGlobalCoords(opt.selected![0]);
+            result = getGlobalCoords(opt.selected![0]);
         }
-        setMenuPos({ top: points[0].y as number , left: points[0].x - 50 as number });
-        setSegmentMenuPos({ top: points[1].y as number, left: points[1].x + 17 as number });
+
+        setMenuPos({ 
+            top: result.points[0].y, 
+            left: result.points[0].x - 50,
+            angle: result.angle
+        });
+        
+        setSegmentMenuPos({ 
+            top: result.points[1].y, 
+            left: result.points[1].x + 17,
+            angle: result.angle
+        });
     }
 
         
@@ -327,7 +412,7 @@ export default function Canvas() {
         setRmbgSliderValue(parseInt(e.target.value));
         const current = canvasIn.current?.getActiveObject();
         if (current?.type == 'image' || current?.type == 'group') {
-            let currentImage = images.current.find((image) => image.fabricImage === current);
+            const currentImage = images.current.find((image) => image.fabricImage === current);
             if (currentImage == null) {
                 return;
             }
@@ -561,7 +646,7 @@ export default function Canvas() {
         activeObject.dirty = true;
         canvasIn.current?.renderAll();
     }
-    
+
     //keyboard shortcuts
     async function handleKeyDown(e: React.KeyboardEvent) {
         if (e.ctrlKey && e.key === 'z') {
@@ -634,14 +719,27 @@ export default function Canvas() {
     }
 
     return (
-        <div onKeyDown={handleKeyDown} tabIndex={0}>
+        <div 
+            onKeyDown={handleKeyDown} 
+            tabIndex={0}
+            onContextMenu={(e) => e.preventDefault()} // Prevent default context menu
+        >
             <div>
                 <canvas id="canvas" ref={canvasRef} /> 
+                {contextMenu && (
+                    <ContextMenu
+                    items={contextMenuItems}
+                    x={contextMenu.x}
+                    y={contextMenu.y}
+                    onClose={() => setContextMenu(null)}
+                    />
+                )}
             </div>
             <div> 
                 <Menu 
                     top={menuPos.top} 
                     left={menuPos.left} 
+                    angle={menuPos.angle}
                     isSegment={isSegment} 
                     handleIsSegment={handleIsSegment} 
                     handleDelete={handleDelete} 
@@ -657,6 +755,7 @@ export default function Canvas() {
                 <SegmentMenu 
                     top={segmentMenuPos.top} 
                     left={segmentMenuPos.left} 
+                    angle={segmentMenuPos.angle}
                     isSegment={isSegment} 
                     isAddPositivePoint={isAddPositivePoint} 
                     handleIsAddPositivePoint={handleIsAddPositivePoint} 
