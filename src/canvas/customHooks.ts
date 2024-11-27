@@ -9,7 +9,7 @@ const useFabric = (canvas: React.MutableRefObject<fabric.Canvas | null>, stack: 
             stack.current = [];
             return;
         }
-        canvas.current = new fabric.Canvas(element, {backgroundColor: 'Gainsboro', preserveObjectStacking: true});
+        canvas.current = new fabric.Canvas(element, {backgroundColor: '#181825', preserveObjectStacking: true});
         const canvasString = localStorage.getItem('canvas') as string;
         if (canvasString && JSON.parse(canvasString)['objects'] && JSON.parse(canvasString)['objects'].length > 1) {
             canvas.current?.loadFromJSON(JSON.parse(canvasString), () => {

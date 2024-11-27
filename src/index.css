@@ -5,7 +5,7 @@
 
   color-scheme: light dark;
   color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
+  background-color: #181825;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -68,6 +68,71 @@ button:focus-visible {
   }
 }
 */
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-background text-white select-none;
+  }
+}
+
+@layer components {
+  .toolbar-button {
+    @apply p-2 rounded-lg transition-colors duration-200 ease-in-out;
+  }
+
+  .toolbar-button:hover {
+    @apply bg-secondary/80;
+  }
+
+  .toolbar-button.active {
+    @apply bg-secondary;
+  }
+
+  .context-menu-item {
+    @apply w-full px-4 py-2 text-left text-sm hover:bg-secondary/80 flex justify-between items-center;
+  }
+
+  .context-menu-item-danger {
+    @apply text-danger;
+  }
+
+  .tooltip {
+    @apply absolute -top-14 left-1/2 -translate-x-1/2 hidden group-hover:block 
+           bg-tooltip px-3 py-2 rounded-lg text-sm whitespace-nowrap shadow-lg
+           transition-opacity duration-200 ease-in-out z-50;
+  }
+}
+
+.logo {
+  font-family: 'Pixel', monospace;
+  image-rendering: pixelated;
+  text-shadow: 2px 2px 0 #000,
+               -2px -2px 0 #000,
+               2px -2px 0 #000,
+               -2px 2px 0 #000;
+}
+
+.canvas {
+  touch-action: none;
+  user-select: none;
+}
+
+.tool-draw {
+  cursor: crosshair !important;
+}
+
+.tool-select {
+  cursor: default !important;
+}
+
+.tool-text {
+  cursor: text !important;
+}
+
+.tool-move {
+  cursor: move !important;
+}

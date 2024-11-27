@@ -1,9 +1,15 @@
 import Canvas from './canvas/Canvas';
+import { AuthProvider } from './contexts/AuthContext';
+import { ToolProvider } from './contexts/ToolContext';
 
 export default function App() {
     return (
         <>
-            <Canvas/>
+        <AuthProvider>
+            <ToolProvider>
+                <Canvas/>
+            </ToolProvider>
+        </AuthProvider>
         </>
     );
 }
